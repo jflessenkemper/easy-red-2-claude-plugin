@@ -166,3 +166,30 @@ under direct launch:
 - In-game F3 Lua console (the `er2_lua` live-tuning path)
 
 Unblock order: Steam launch-options fix → open Stonne → map the spawner panel → map F3.
+
+### Gotcha — editor GUI toggle + transform mode **[V]**
+
+Selecting an object enters a transform sub-mode: the top bar switches to
+`Quick transform / 5-6 Elevate / Z Drag / 0 Reset transform` and the normal editor bars are
+replaced. **X** toggles the whole GUI, and it is easy to lose track of parity — pressing it
+blind can leave you with no toolbars at all (only the "MISSION EDITOR" watermark).
+Escape opens the PAUSE menu (Settings / Resume / **Exit**) — `Resume` is at ~(1804, 886);
+do NOT click Exit by accident.
+
+**Recommendation:** do not drive the editor GUI to attach brains. Use the script path instead
+(below) — it is deterministic and needs no clicking.
+
+### DISCOVERY — the Brain field is not required at all **[V, high value]**
+
+`Soldier.setBrain(file)` works at runtime, and `soldier_spawned` fires for every unit. So the
+phase script can attach the AI brain to **every** soldier itself:
+
+```lua
+er2.setCallback("soldier_spawned", function(s) s.setBrain("Realistic.lua") end)
+local sol = {}; er2.getAllSoldiers(sol)
+for _, s in pairs(sol) do s.setBrain("Realistic.lua") end   -- catch already-spawned units
+```
+
+This removes the single most common silent failure (an empty Squad Spawner `Brain` field means
+every soldier runs base AI), covers reinforcements that a spawner field would miss, and needs
+no editor interaction whatsoever. Implemented in `RealisticEvents.lua` as `AUTO_ATTACH_BRAIN`.
