@@ -154,13 +154,32 @@ socket in `$HOME` (`$HOME/.er2harness.sock`), which every party shares.
 
 ---
 
+## SOLVED — how to play a custom mission **[V]**
+
+**It is inside the editor, in the save panel** — not in Campaigns, not in Multiplayer, not in
+the mission-properties dialog (all three verified to lack it).
+
+Editor → bottom-left `Σ` (49, 1044) opens a drawer with a bottom toolbar:
+
+| Icon | Coords | Panel |
+|---|---|---|
+| ☰ | (49, 1044) | Battle settings: name, gamemode, factions, tickets, max concurrent |
+| 📍 | (134, 1044) | objectives / markers |
+| ☀ | (216, 1044) | weather / time |
+| 👥 | (298, 1044) | units / squads |
+| **💾** | **(380, 1044)** | **Save · Play · Play from current phase · Difficulty · Guide** |
+| `</>` | (463, 1044) | Scripting: Scripting Guide, **Manage AI scripts**, **Id tables**, localization, Mission ID |
+| ❰❰ | (636, 1044) | collapse drawer |
+
+Save/Play panel buttons: **Save** (300, 108), **Play** (300, 183),
+**Play from current phase (N)** (300, 258), Difficulty (300, 333), Guide (300, 450).
+
+`</>` → **Manage AI scripts** (300, 192) opens a "Script editor" listing the mission's AI
+scripts with a *New script* name box + Create. Scripts dropped into the mission's
+`scripts/AI/` folder on disk show up here. **Id tables** (300, 274) is the in-game enum
+reference (VoiceClip etc.).
+
 ## Still unmapped
-
-The DLC blocker is **solved**, and the editor itself is reached and mapped. Remaining:
-
-- **How to PLAY a custom mission.** The mission-properties dialog offers Edit / Share / Quick
-  edit / Delete but **no Play button**, so the launch path for a custom mission is not yet
-  known (it is not in that dialog). Needed before an automated play-test is possible.
 - Squad Spawner properties panel (the `Brain` field) — **no longer on the critical path**: the
   phase script now attaches brains itself via `setBrain`, see the discovery note above.
 - In-game F3 Lua console (the `er2_lua` live-tuning path) — needs a running match.
