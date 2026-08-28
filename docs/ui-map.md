@@ -280,3 +280,26 @@ parsing the `@(x,z)` in every trace line and computing per-soldier displacement:
 
 **Method worth repeating:** never accept "the log shows the decision" as proof of behaviour.
 Diff positions over time and compare movement against the order class.
+
+## A/B EXPERIMENT — does suppressing base-AI order-following help? NO (2026-08-28)
+
+Question: is observed movement caused by OUR `moveTo`, or by base AI coincidentally agreeing?
+Method: within a single battle, half the soldiers set `allowFollowOrders(false)` while an
+override was active (and restored it on hand-back); the other half were untouched. Same map,
+same fight, so the difference is attributable to the lever.
+
+**Trap hit first:** `uid % 2` produced a degenerate split (control n=0). ER2 hands out unique
+IDs with an **even stride** (observed 262 apart), so every uid is even. `(uid // 2) % 2`
+alternates properly — verified 148/165 over 313 real uids before re-running.
+
+**Result (n=133 suppressed vs 128 control):**
+
+| group | suppressed | control | delta |
+|---|---|---|---|
+| overall | 6.8 m | 7.5 m | −9% |
+| attackers | 14.5 m | 13.0 m | +11% |
+| defenders | 3.2 m | 3.9 m | −17% |
+
+All within noise. **Verdict: do not suppress base-AI order-following** — it buys nothing and is
+marginally worse overall. Defenders stayed put in both groups (66% vs 56% stuck), confirming
+their holding is base-AI behaviour that should not be fought. `AB_SUPPRESS_BASE_AI = false`.
