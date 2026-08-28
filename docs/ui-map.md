@@ -154,18 +154,17 @@ socket in `$HOME` (`$HOME/.er2harness.sock`), which every party shares.
 
 ---
 
-## Not yet mapped (blocked)
+## Still unmapped
 
-Everything past opening a mission is unmapped, because both local missions are DLC-blocked
-under direct launch:
+The DLC blocker is **solved**, and the editor itself is reached and mapped. Remaining:
 
-- Mission-editor canvas: object placement, camera controls, the **P**-key world-position copy
-- **Squad Spawner properties — including the `Brain` field**, the single most important control
-  for the Realistic mod (an empty Brain field silently means every soldier runs base AI)
-- Save / Play-test flow
-- In-game F3 Lua console (the `er2_lua` live-tuning path)
-
-Unblock order: Steam launch-options fix → open Stonne → map the spawner panel → map F3.
+- **How to PLAY a custom mission.** The mission-properties dialog offers Edit / Share / Quick
+  edit / Delete but **no Play button**, so the launch path for a custom mission is not yet
+  known (it is not in that dialog). Needed before an automated play-test is possible.
+- Squad Spawner properties panel (the `Brain` field) — **no longer on the critical path**: the
+  phase script now attaches brains itself via `setBrain`, see the discovery note above.
+- In-game F3 Lua console (the `er2_lua` live-tuning path) — needs a running match.
+- Editor object list / how to locate a specific spawner without hunting in 3D.
 
 ### Gotcha — editor GUI toggle + transform mode **[V]**
 
@@ -193,3 +192,25 @@ for _, s in pairs(sol) do s.setBrain("Realistic.lua") end   -- catch already-spa
 This removes the single most common silent failure (an empty Squad Spawner `Brain` field means
 every soldier runs base AI), covers reinforcements that a spawner field would miss, and needs
 no editor interaction whatsoever. Implemented in `RealisticEvents.lua` as `AUTO_ATTACH_BRAIN`.
+
+### Screen 7 — CREATE MISSION → map picker **[V]**
+
+Mission list → **CREATE MISSION** (261, 77) opens a map picker:
+
+| Element | Coords | Status |
+|---|---|---|
+| Search box | (1075, 143) | [O] |
+| Source tabs: Vanilla / Local / Workshop | (700, 315 / 360 / 406) | [O] |
+| **Virtual Scene** (first row) | **(1046, 219)** | **[V]** — flat grid, no DLC: ideal test bed |
+| Map rows below | pitch ≈ 48 px | [O] |
+| CANCEL | (697, 1000) | [O] |
+
+Map rows carry a DLC badge on the right (e.g. Stalingrad, Normandy, Shanghai/Nanking).
+Selecting a map creates the mission and loads the editor (~50 s).
+
+### Custom missions are NOT playable from Campaigns or the mission dialog **[V]**
+
+Checked all three: Campaigns lists official campaigns only (sidebar ends at
+"Operation Spring Awakening"); Multiplayer → Create Match shows the official campaign
+browser; the mission-properties dialog has Edit/Share/Quick-edit/Delete but **no Play**.
+The play path for a custom mission is still unidentified — pending.
