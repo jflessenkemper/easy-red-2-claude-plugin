@@ -247,3 +247,17 @@ Save refuses with a red modal until both are satisfied (OK button at (960, 618))
 So a mission cannot be created purely from the outside: the first phase requires in-editor
 placement. Scripts alone (even `spawnSquad_script`) cannot bootstrap a brand-new mission,
 because the mission will not save without a configured first phase.
+
+## VERIFIED LIVE — full play-test through the plugin (2026-08-28)
+
+`er2_play_mission(map_row=2)` drove main menu -> editor -> Stonne -> "[Historical] Crossing at
+Donchery" -> Play in ONE call, then faction selection. Results from the running battle:
+
+- `brain attached to 350 soldier(s)` — the phase-script auto-attach replaces the Brain field.
+- 10,731 `[REALISTIC]` decisions in one run; every cascade branch reachable:
+  MOUNTED/CREW-defer 5458, ROAD-MARCH 5288, FIGHT-from-cover 348, PINNED 195,
+  LEADER-cover 91, ADVANCE-behind-armour 47, RALLY-on-MG 31, REBOARD-transport 26,
+  MEDIC-hold-cover 23, ASSAULT 9.
+- Nation + role detection works on both sides: germany/france trooper, LEADER, medic, MG-gunner.
+- Objective attraction drives capture: `obj1 inv=15 def=0 held=true <- CAPTURED by attackers`.
+- After removing the soldier_suppressed subscription: **0 callback errors** (was 12+ per run).

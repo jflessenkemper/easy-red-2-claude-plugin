@@ -366,18 +366,95 @@ def t_key(args):
 
 
 def t_type(args):
+    """Type text. The harness has a native TYPE command — use it; falling back to
+    per-character VK codes only if the build predates it."""
     require_live()
     s = str(args["text"])
+    reply = hsend(["TYPE %s" % s])[0]
+    if reply.startswith("OK"):
+        return [text("typed %r via native TYPE" % s)]
     cmds = []
     for ch in s:
         try:
             cmds.append("KEY %#04x" % _vk_of(ch))
         except ValueError:
-            continue  # skip characters we can't map on a US-ANSI layout
+            continue
     if not cmds:
-        return [text("nothing typeable in %r" % s)]
+        return [text("TYPE unsupported (%s) and nothing VK-mappable in %r" % (reply, s))]
     hsend(cmds)
-    return [text("typed %d chars" % len(cmds))]
+    return [text("TYPE unsupported (%s); sent %d VK keys instead" % (reply, len(cmds)))]
+
+
+# ---- scripted UI navigation -------------------------------------------------
+# Verified coordinates (see docs/ui-map.md). Encoded here so menu driving is a single
+# deterministic call instead of hand-clicking, and so a UI change is fixed in one place.
+UI = {
+    "menu_mission_editor": (204, 820),
+    "hub_mission_editor": (1392, 403),
+    "list_row1_y": 79,          # first map row; pitch 52
+    "list_row_pitch": 52,
+    "list_x": 1544,
+    "edit_mission": (960, 371),
+    "sigma": (49, 1044),
+    "save_icon": (380, 1044),
+    "btn_save": (300, 108),
+    "btn_play": (300, 183),
+    "btn_play_from_phase": (300, 258),
+    "modal_ok": (960, 618),
+}
+
+
+def _click(x, y, settle=1.0, reliable=True):
+    hsend(["MOVE %d %d" % (x, y)])
+    time.sleep(0.4)
+    hsend(["CLICK %d %d 1" % (x, y)])
+    if reliable:
+        time.sleep(0.6)
+        hsend(["CLICK %d %d 1" % (x, y)])
+    time.sleep(settle)
+
+
+def t_play_mission(args):
+    """Drive: main menu -> Mission Editor -> pick map row -> pick its mission -> Edit
+    mission -> (sigma) -> save panel -> Play. Coordinates are the verified ones above.
+
+    Assumes the game is sitting on the MAIN MENU. Selecting a map expands a mission
+    sub-row directly beneath it (row pitch 52), so the mission row is map_row_y + pitch.
+    """
+    require_live()
+    row = int(args.get("map_row", 1))
+    load_s = float(args.get("load_s", 75))
+    steps = []
+
+    _click(*UI["menu_mission_editor"], settle=5)
+    steps.append("mission editor")
+    _click(*UI["hub_mission_editor"], settle=6)
+    steps.append("editor hub")
+
+    map_y = UI["list_row1_y"] + (row - 1) * UI["list_row_pitch"]
+    _click(UI["list_x"], map_y, settle=2, reliable=False)
+    steps.append("selected map row %d (y=%d)" % (row, map_y))
+
+    mission_y = map_y + UI["list_row_pitch"]
+    _click(UI["list_x"], mission_y, settle=3, reliable=False)
+    steps.append("selected mission sub-row (y=%d)" % mission_y)
+
+    _click(*UI["edit_mission"], settle=3, reliable=False)
+    steps.append("clicked Edit mission; waiting %ds for map load" % load_s)
+    time.sleep(load_s)
+
+    if args.get("play", True):
+        _click(*UI["sigma"], settle=2, reliable=False)
+        _click(*UI["save_icon"], settle=2, reliable=False)
+        _click(*UI["btn_play"], settle=5, reliable=False)
+        steps.append("clicked Play")
+
+    path = os.path.join(TMP, "nav.png")
+    hsend(["SCREENSHOT %s" % path])
+    out = [text("navigation steps:\n- " + "\n- ".join(steps))]
+    if os.path.exists(path):
+        out.append(img_content(path, scale_to=int(args.get("scale", 1000))))
+    return out
 
 
 def t_lua(args):
@@ -556,6 +633,23 @@ TOOLS = {
             "code": {"type": "string", "description": "Lua to execute, e.g. print(er2.getMapName())"},
             "close": {"type": "boolean", "description": "close the console afterwards (default true)"}},
             "required": ["code"]},
+    },
+    "er2_play_mission": {
+        "fn": t_play_mission,
+        "description": "Drive the menus and START a custom mission, in one call: Mission Editor "
+                       "-> pick the map row -> pick its mission sub-row -> Edit mission -> save "
+                       "panel -> Play. Uses the verified coordinates in docs/ui-map.md, so no "
+                       "hand-clicking. Game must be on the MAIN MENU. Returns a screenshot of "
+                       "where it ended up. NOTE: custom missions cannot be started from Campaigns "
+                       "or Multiplayer — only from inside the editor's save panel.",
+        "schema": {"type": "object", "properties": {
+            "map_row": {"type": "integer", "description": "1-based row of the MAP in the Local "
+                        "list (rows are maps; the mission appears as a sub-row beneath)"},
+            "play": {"type": "boolean", "description": "click Play at the end (default true); "
+                     "false stops in the editor"},
+            "load_s": {"type": "number", "description": "seconds to wait for the map to load "
+                       "(default 75)"},
+            "scale": {"type": "integer", "description": "screenshot downscale width"}}},
     },
     "er2_log": {
         "fn": t_log,
