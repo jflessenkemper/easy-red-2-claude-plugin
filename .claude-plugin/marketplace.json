@@ -1,0 +1,24 @@
+{
+  "name": "asap-australia",
+  "description": "Plugins for driving and instrumenting games from Claude — headless game control, screen vision, input injection and mod-script tooling.",
+  "owner": {
+    "name": "ASAP Australia",
+    "url": "https://github.com/ASAP-Australia"
+  },
+  "plugins": [
+    {
+      "name": "easy-red-2",
+      "source": "./plugins/easy-red-2",
+      "description": "See, drive and instrument Easy Red 2 from Claude. Runs the game headless in a gamescope harness (no host window, never touches your cursor), returns screenshots inline, injects clicks and keys, executes Lua in the in-game F3 console for live tuning, tails mod telemetry from Player.log, and syntax-validates + deploys mission and AI-brain scripts.",
+      "version": "1.0.0",
+      "author": {
+        "name": "ASAP Australia"
+      },
+      "homepage": "https://github.com/ASAP-Australia/easy-red-2-claude",
+      "repository": "https://github.com/ASAP-Australia/easy-red-2-claude",
+      "license": "MIT",
+      "keywords": ["easy-red-2", "gamedev", "modding", "lua", "game-automation", "gamescope"],
+      "category": "gamedev"
+    }
+  ]
+}

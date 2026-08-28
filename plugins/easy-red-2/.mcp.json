@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "easy-red-2": {
+      "type": "stdio",
+      "command": "python3",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/tools/er2_mcp/server.py"
+      ],
+      "env": {
+        "ER2_HARNESS_SOCK": "${ER2_HARNESS_SOCK:-/tmp/ER2Harness.sock}"
+      }
+    }
+  }
+}
