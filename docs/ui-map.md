@@ -233,3 +233,17 @@ Checked all three: Campaigns lists official campaigns only (sidebar ends at
 "Operation Spring Awakening"); Multiplayer → Create Match shows the official campaign
 browser; the mission-properties dialog has Edit/Share/Quick-edit/Delete but **no Play**.
 The play path for a custom mission is still unidentified — pending.
+
+### Saving a NEW mission has prerequisites **[V]**
+
+Save refuses with a red modal until both are satisfied (OK button at (960, 618)):
+
+1. **"Battle name not setted!"** — set it in the `☰` settings panel: click the battle-name
+   field at (305, 46) and type. (The harness has a native `TYPE <text>` command — it works and
+   is far better than per-character VK keys.)
+2. **"First phase not setted up!"** — the initial phase needs objectives/spawns placed in the
+   3D view before the mission can be saved or played.
+
+So a mission cannot be created purely from the outside: the first phase requires in-editor
+placement. Scripts alone (even `spawnSquad_script`) cannot bootstrap a brand-new mission,
+because the mission will not save without a configured first phase.
