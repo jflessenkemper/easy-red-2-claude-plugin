@@ -261,3 +261,22 @@ Donchery" -> Play in ONE call, then faction selection. Results from the running 
 - Nation + role detection works on both sides: germany/france trooper, LEADER, medic, MG-gunner.
 - Objective attraction drives capture: `obj1 inv=15 def=0 held=true <- CAPTURED by attackers`.
 - After removing the soldier_suppressed subscription: **0 callback errors** (was 12+ per run).
+
+## MEASURED BEHAVIOUR — are troops actually obeying orders? (2026-08-28)
+
+Decisions in the log prove the brain is *deciding*, NOT that the game obeys. Verified by
+parsing the `@(x,z)` in every trace line and computing per-soldier displacement:
+
+- 363 soldiers traced; **310 moved** (path > 5 m), median path 62 m, max net displacement
+  1397 m. So orders do reach the engine.
+- Hold-type orders correctly produce no movement (PINNED 5 m, FIGHT-from-cover 2 m median).
+- Mounted troops move furthest (389 m / 118 m median across runs) — base AI drives them.
+- **Attackers move (122 m median); defenders do not (7 m median), regardless of the order
+  issued.** Base AI keeps defenders on their defensive positions and overrides `moveTo`
+  because `allowFollowOrders` is true. Relabelling the order (ROAD-MARCH -> DEFEND-move-up)
+  changed nothing: 158 soldiers still averaged 6 m.
+- Conclusion: this is correct for a defensive battle, so the brain no longer fights it —
+  defenders hold and take cover unless absurdly out of position (`DEFEND_RADIUS`).
+
+**Method worth repeating:** never accept "the log shows the decision" as proof of behaviour.
+Diff positions over time and compare movement against the order class.
