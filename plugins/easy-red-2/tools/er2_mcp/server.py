@@ -84,7 +84,10 @@ def _find_harness():
     return _first_existing(cands, "")
 
 
-SOCK = os.environ.get("ER2_HARNESS_SOCK", "/tmp/ER2Harness.sock")
+# Socket in $HOME, NOT /tmp: Steam launches the harness in a different mount namespace from
+# sandboxed tooling with a private /tmp. The socket binds (ss -lx shows LISTEN) but is invisible
+# to the client, which is indistinguishable from "harness not running". $HOME is always shared.
+SOCK = os.environ.get("ER2_HARNESS_SOCK") or os.path.join(HOME, ".er2harness.sock")
 HARNESS = os.environ.get("ER2_HARNESS_BIN") or _find_harness()
 GAME_DIR = os.environ.get("ER2_GAME_DIR") or _find_game_dir()
 GAME_BIN = os.path.join(GAME_DIR, "Easy Red 2.x86_64")
@@ -209,6 +212,36 @@ def t_launch(args):
                 return [text("already running: %s" % json.dumps(st))]
         except HarnessError:
             pass  # stale socket, fall through and relaunch
+
+    # STEAM MODE (required for DLC): a directly-launched process cannot verify DLC
+    # entitlements, so DLC missions show "Needs DLCs: ..." and refuse to open. Launching
+    # through Steam's %command% wrapper (reaper SteamLaunch AppId=...) fixes it. Requires
+    # launch options already set — see tools/fix_steam_launch_options.py.
+    # NOTE: `steam -applaunch` silently does nothing; the steam:// URL is what works.
+    if args.get("via_steam"):
+        try:
+            os.path.exists(SOCK) and os.unlink(SOCK)
+        except OSError:
+            pass
+        env = dict(os.environ)
+        env.setdefault("XDG_RUNTIME_DIR", "/run/user/1000")
+        subprocess.Popen(["xdg-open", "steam://rungameid/%s" % APPID],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         env=env, start_new_session=True)
+        deadline = time.time() + float(args.get("timeout_s", 180))
+        while time.time() < deadline:
+            if os.path.exists(SOCK):
+                try:
+                    st = parse_state(hsend(["STATE"])[0])
+                    if st.get("ready") == "1" and st.get("inner_alive") == "1":
+                        return [text("launched via Steam (DLC entitlements available). STATE=%s"
+                                     % json.dumps(st))]
+                except HarnessError:
+                    pass
+            time.sleep(3)
+        return [text("Steam launch timed out. Check that launch options are set: "
+                     "python3 tools/fix_steam_launch_options.py  (Steam must be shut down to "
+                     "apply). Socket expected at %s" % SOCK)]
     if not os.path.exists(HARNESS):
         return [text("ERROR harness binary missing: %s" % HARNESS)]
     if not os.path.exists(GAME_BIN):
@@ -454,13 +487,20 @@ TOOLS = {
         "fn": t_launch,
         "description": "Launch Easy Red 2 HEADLESS inside the gamescope harness (no host window, "
                        "does not touch the host cursor). Idempotent: returns early if already alive. "
-                       "Waits until the game reports ready.",
+                       "Waits until the game reports ready. "
+                       "USE via_steam=true WHENEVER DLC CONTENT IS NEEDED: a directly-launched "
+                       "process cannot verify DLC entitlements, so DLC missions show "
+                       "'Needs DLCs: ...' and will not open. via_steam launches through Steam's "
+                       "%command% wrapper instead (requires launch options set once via "
+                       "tools/fix_steam_launch_options.py).",
         "schema": {"type": "object", "properties": {
             "width": {"type": "integer", "description": "output width (default 1920)"},
             "height": {"type": "integer", "description": "output height (default 1080)"},
             "fps": {"type": "integer", "description": "framerate cap (default 30)"},
             "mute": {"type": "boolean", "description": "route game audio to a null sink so it "
                      "cannot reach the speakers (default TRUE — leave on unless you need sound)"},
+            "via_steam": {"type": "boolean", "description": "launch through Steam so DLC "
+                          "entitlements are visible (REQUIRED for DLC maps/missions)"},
             "timeout_s": {"type": "integer", "description": "seconds to wait for ready (default 90)"}}},
     },
     "er2_stop": {
