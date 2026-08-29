@@ -303,3 +303,34 @@ alternates properly — verified 148/165 over 313 real uids before re-running.
 All within noise. **Verdict: do not suppress base-AI order-following** — it buys nothing and is
 marginally worse overall. Defenders stayed put in both groups (66% vs 56% stuck), confirming
 their holding is base-AI behaviour that should not be fought. `AB_SUPPRESS_BASE_AI = false`.
+
+## 2026-08-29 — er2_play_mission can report success while the game never enters play
+
+**Symptom:** `er2_play_mission(map_row=2)` returned the full happy-path step list ending in
+`clicked Play`, and `[REALISTIC]`/`[EVENTS]` lines DID appear in Player.log (brains attached,
+tally incrementing) — but a screenshot showed the game still sitting in the **Mission Editor at
+"Initial phase"**. Phase scripts execute in the editor, so log activity is NOT proof of play.
+Decision traces trickled at ~2/s with only ROAD-MARCH / PINNED / MOUNTED-CREW-defer reachable,
+and analyse_run.py returned a meaningless GATE: FAIL on 1-5 segment samples.
+
+**Cause:** the Sigma -> Save -> Play chain is click-timing sensitive. Clicking Save at (380,1044)
+opens a SUBMENU (Save / Play / Play from current phase (0) / Difficulty / Guide); the Play entry
+sits at approximately **(300,184)**. If the submenu has not rendered when the Play click fires,
+the click lands on the editor viewport and is silently swallowed. No error is raised.
+
+**Working manual sequence (verified 2026-08-29), screenshot-verified between EVERY step:**
+1. `er2_click (49,1044)`  -> Sigma panel (mission battle data: factions, max concurrent)
+2. `er2_click (380,1044)` -> Save/Play submenu
+3. `er2_click (300,184)`  -> Play; ~45 s load
+4. `er2_click (864,884)`  -> FACTION SELECTION, left flag = Axis/attacker, right = Allies
+5. Battle intro plays (title, date, commander briefing).
+   **`escape` does NOT skip the intro — it opens the PAUSE menu.** Resume is at ~(1805,885).
+6. After Resume, decision traces run at ~7/s (vs ~2/s in the editor) — this rate difference is a
+   cheap liveness check for "actually playing" vs "editor preview".
+
+**Rule learned:** never trust a navigation tool's own success report. Screenshot-verify the game
+state before marking a log position, or you will analyse an editor preview and draw conclusions
+from it. Log activity alone does not distinguish editor from play.
+
+**Also observed:** in-game pause menu showed Music volume 0%, Master 25.2% — settings left
+untouched deliberately (user's own audio config; harness handles muting via null PULSE_SINK).

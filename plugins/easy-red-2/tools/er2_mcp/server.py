@@ -515,19 +515,25 @@ def t_deploy(args):
     ms = os.path.join(mdir, "scripts", "mission")
     os.makedirs(ai, exist_ok=True)
     os.makedirs(ms, exist_ok=True)
+    # (source, dest dir, dest name, required). A required source that is absent aborts the
+    # deploy; an optional one is skipped, so bench/helper scripts may be deleted from the mod
+    # without breaking deployment.
     plan = [
-        ("Realistic.lua", ai, "Realistic.lua"),
-        ("WatchSquad.lua", ai, "WatchSquad.lua"),
-        ("bench_probe.lua", ai, "bench_probe.lua"),
-        ("RealisticEvents.lua", ms, "phase_0.lua"),
-        ("bench_watch.lua", ms, "bench_watch.lua"),
+        ("Realistic.lua", ai, "Realistic.lua", True),
+        ("WatchSquad.lua", ai, "WatchSquad.lua", False),
+        ("bench_probe.lua", ai, "bench_probe.lua", False),
+        ("RealisticEvents.lua", ms, "phase_0.lua", True),
+        ("bench_watch.lua", ms, "bench_watch.lua", False),
     ]
     report = []
     luajit = shutil.which("luajit")
-    for src_name, dst_dir, dst_name in plan:
+    for src_name, dst_dir, dst_name, required in plan:
         src = os.path.join(MOD_SRC, src_name)
         if not os.path.exists(src):
-            report.append("SKIP %s (missing)" % src_name)
+            if required:
+                report.append("FAIL %s (required source not found in %s)" % (src_name, MOD_SRC))
+                return [text("deploy to %s ABORTED:\n%s" % (mission, "\n".join(report)))]
+            report.append("SKIP %s (absent)" % src_name)
             continue
         if luajit:
             r = subprocess.run(
