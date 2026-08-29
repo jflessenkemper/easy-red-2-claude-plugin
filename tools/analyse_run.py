@@ -57,7 +57,7 @@ MOVE_ORDERS = {
 }
 HOLD_ORDERS = {
     "REBOARD-transport", "ADVANCE-baseAI", "BOUND-overwatch", "AT-hunt",
-    "CREW-onfoot", "DRAG-pickup", "DRAG-pickup-wait", "RADIO-fire-mission",
+    "CREW-onfoot", "DRAG-pickup", "DRAG-abandon", "RADIO-fire-mission",
 }
 # Cover-seeking orders. `findCover` is a VOID COMMAND whose entire purpose is to RELOCATE the
 # soldier to a cover position (Realistic.lua:747 - "findCover is a command; it moves us into
@@ -69,7 +69,7 @@ HOLD_ORDERS = {
 # what exposed the misclassification.
 COVER_ORDERS = {
     "FIGHT-from-cover", "SUPPORT-hold-fire", "MEDIC-hold-cover", "PINNED",
-    "LEADER-cover", "DEFEND-hold", "ROUT-cover", "AT-hold-cover",
+    "LEADER-cover", "DEFEND-hold", "ROUT-cover",
 }
 EXEMPT_ORDERS = {
     "MOUNTED/CREW-defer",
