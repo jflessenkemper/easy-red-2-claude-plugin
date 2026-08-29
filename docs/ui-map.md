@@ -334,3 +334,24 @@ from it. Log activity alone does not distinguish editor from play.
 
 **Also observed:** in-game pause menu showed Music volume 0%, Master 25.2% — settings left
 untouched deliberately (user's own audio config; harness handles muting via null PULSE_SINK).
+
+## 2026-08-29 — er2_launch without via_steam silently loses DLC entitlements
+
+**Symptom:** after `er2_launch` with default args, the Mission Editor map list showed `Stonne`
+expanding to a single greyed row reading **`Needs DLCs: Ardennes`** instead of the mission. The
+row highlights on click but nothing opens — no Edit button, no error, no log line.
+
+**Cause:** `er2_launch` defaults to launching the binary directly. DLC entitlements only resolve
+when the game is started **through Steam**, so every DLC map becomes unselectable while
+non-DLC maps (`Realistic Test map`, `VirtualScene`) still work — which makes it look like a
+mission-specific problem rather than a launch-mode problem.
+
+**Fix:** `er2_launch {"via_steam": true}`. Confirms with
+`launched via Steam (DLC entitlements available)`.
+
+**Gotcha:** calling `er2_stop` immediately followed by `er2_launch` fails with
+`ConnectionResetError: [Errno 104] Connection reset by peer` — the harness socket is still
+tearing down. Sleep ~15 s between stop and launch.
+
+**Rule:** if a known-good mission suddenly cannot be opened, check the launch mode before
+suspecting the mission or the scripts. The symptom names the DLC, not the cause.
