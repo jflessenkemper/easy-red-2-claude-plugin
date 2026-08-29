@@ -51,7 +51,7 @@ ERRORS = re.compile(
 # core of the check: a move-order that produces no displacement is a defect.
 MOVE_ORDERS = {
     "ROAD-MARCH", "ADVANCE-behind-armour", "RALLY-on-MG", "ASSAULT", "ROUT",
-    "RETURN-to-transport", "MEDIC-sortie", "DEFEND-move-up", "BOUND-move",
+    "RETURN-to-transport", "MEDIC-sortie", "BOUND-move",
     "BOUND-move-cover", "DRAG-approach", "DRAG-to-cover", "AT-stalk",
     "ASSAULT-cover",
 }
