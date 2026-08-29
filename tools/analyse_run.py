@@ -50,7 +50,7 @@ ERRORS = re.compile(
 # Which labels are an order to MOVE, and which are an order to HOLD. This mapping is the
 # core of the check: a move-order that produces no displacement is a defect.
 MOVE_ORDERS = {
-    "ROAD-MARCH", "RALLY-on-MG", "ASSAULT", "MEDIC-sortie", "DRAG-approach",
+    "RALLY-on-MG", "ASSAULT", "MEDIC-sortie", "DRAG-approach",
     "BOUND-move", "ADVANCE-behind-armour", "ROUT", "RETURN-to-transport",
 }
 HOLD_ORDERS = {
@@ -79,6 +79,20 @@ COVER_ORDERS = {
 EXEMPT_ORDERS = {
     "MOUNTED/CREW-defer", "ADVANCE-baseAI",
 }
+# Orders judged by whether they achieve their PURPOSE rather than by a speed threshold.
+# An approach march succeeds by CLOSING ON THE OBJECTIVE, not by sustaining a given pace: a real
+# march includes pauses for cover, obstacles and terrain, so pooled speed understates it.
+# MEASURED 2026-08-29 - four road-marchers covered 379 m, 287 m, 200 m and 12 m while closing
+# 118 m, 101 m, 177 m and 7 m on the objective. Three were unambiguously marching, yet their
+# pooled speeds (0.41-0.70 m/s) sat under the 0.8 m/s move threshold and the gate called the
+# whole label NOT MOVING.
+# This is NOT a loosened threshold. It is stricter in the direction that matters: a soldier who
+# moves quickly in the WRONG direction now fails, where the speed test would have passed him.
+OBJECTIVE_ORDERS = {
+    "ROAD-MARCH",
+}
+OBJECTIVE_CLOSE_FRAC = 0.6   # share of contributing soldiers that must close on the objective
+OBJECTIVE_CLOSE_M = 10.0     # metres of closure that count as progress (beyond sampling noise)
 # Thresholds are in METRES PER SECOND, measured with the mission clock (t=) rather than the
 # sample index, and attributed only to the order that was active while the movement happened.
 #
@@ -112,7 +126,7 @@ MIN_SOLDIERS = 3         # contributing soldiers a label needs before the gate m
                          # below this the row prints but is INSUFFICIENT DATA and cannot fail
 
 # Features expected to appear at all (from realistic.md §6.2). Absence = investigate.
-EXPECTED_LABELS = sorted(MOVE_ORDERS | HOLD_ORDERS | COVER_ORDERS | EXEMPT_ORDERS)
+EXPECTED_LABELS = sorted(MOVE_ORDERS | HOLD_ORDERS | COVER_ORDERS | EXEMPT_ORDERS | OBJECTIVE_ORDERS)
 
 
 def load(path: str, from_line: int):
@@ -250,6 +264,18 @@ def main() -> int:
     by_order, pooled_s, dropped, dropped_total = pooled_speeds(tracks, a.max_gap, a.min_pooled)
 
     verdicts = {}
+    # Per-label objective closure, for the labels judged on purpose rather than pace.
+    closure = {}
+    for label in OBJECTIVE_ORDERS:
+        closed = total = 0
+        for uid, pts in tracks.items():
+            ds = [p["objd"] for p in pts if p["label"] == label and p["objd"] is not None]
+            if len(ds) >= 3:
+                total += 1
+                if ds[-1] < ds[0] - OBJECTIVE_CLOSE_M:
+                    closed += 1
+        closure[label] = (closed, total)
+
     for label in sorted(set(labels) | set(by_order)):
         speeds = by_order.get(label, [])
         n_sold = len(speeds)
@@ -260,6 +286,15 @@ def main() -> int:
         if label in EXEMPT_ORDERS:
             ok = True
             verdict = "EXEMPT (base AI by design)"
+        elif label in OBJECTIVE_ORDERS:
+            closed, tot = closure.get(label, (0, 0))
+            if tot < MIN_SOLDIERS:
+                ok, verdict = None, "INSUFFICIENT DATA (n<%d)" % MIN_SOLDIERS
+            else:
+                frac = closed / tot
+                ok = frac >= OBJECTIVE_CLOSE_FRAC
+                verdict = "OK closing (%d/%d men gained >%.0fm)" % (closed, tot, OBJECTIVE_CLOSE_M) if ok \
+                          else "!! NOT CLOSING (%d/%d men gained >%.0fm)" % (closed, tot, OBJECTIVE_CLOSE_M)
         elif label in COVER_ORDERS:
             # findCover relocates the man; neither threshold applies. Report, never gate.
             ok = True
@@ -293,6 +328,7 @@ def main() -> int:
                 opening += 1
             else:
                 flat += 1
+
 
     missing = [l for l in EXPECTED_LABELS if l not in labels]
     ab_groups = collections.Counter(r["ab"] for r in rows if r["ab"] is not None)
