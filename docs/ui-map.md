@@ -355,3 +355,30 @@ tearing down. Sleep ~15 s between stop and launch.
 
 **Rule:** if a known-good mission suddenly cannot be opened, check the launch mode before
 suspecting the mission or the scripts. The symptom names the DLC, not the cause.
+
+## 2026-08-29 — the phase script is NOT reloaded for each battle in one game process
+
+**Symptom:** deploy a changed `phase_0.lua`, click Play, run a battle — and the new code does not
+run. Event callbacks (`soldier_died` etc.) keep firing normally, so the script looks alive: the
+kill feed works, the tally increments. But nothing from the 1 s `while true` loop appears — no
+objective-attraction lines, no bail-out drain, no fire-mission consumption.
+
+**Evidence:** across a 495k-line Player.log there are only **6** `initial brain sweep` lines (one
+per phase-script LOAD), the last at line 446,818 — while battles continued past line 495,000.
+Loop-sourced output (`invAttract`, `alive invaders=`) stops at line 462,427 and never resumes.
+
+**Cause, two parts:**
+1. The phase loop begins `if getCurrentPhaseId() ~= MY_PHASE then break end`. When a battle ends
+   the phase changes, the loop breaks, and it never restarts.
+2. Starting another battle in the SAME game process does not re-load the phase script, so the
+   dead-loop instance persists — with its callbacks still registered, which is what makes it look
+   healthy.
+
+**Consequence:** a `deploy -> Play` cycle without a game restart can silently test STALE phase
+code. Two verification runs were wasted this way.
+
+**Rule:** after changing `RealisticEvents.lua`, RESTART THE GAME (`er2_stop`, wait ~15 s,
+`er2_launch {"mute":true,"via_steam":true}`) before trusting the run. Confirm the reload by
+checking for a NEW `initial brain sweep` line after your log mark — that line is the only
+reliable proof the phase script actually re-loaded. Brain (`Realistic.lua`) changes do reload per
+battle, because brains are re-attached to freshly spawned soldiers.

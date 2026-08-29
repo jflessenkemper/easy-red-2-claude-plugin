@@ -218,7 +218,12 @@ def t_launch(args):
     # through Steam's %command% wrapper (reaper SteamLaunch AppId=...) fixes it. Requires
     # launch options already set — see tools/fix_steam_launch_options.py.
     # NOTE: `steam -applaunch` silently does nothing; the steam:// URL is what works.
-    if args.get("via_steam"):
+    # DEFAULTS ON. A directly-launched process cannot verify DLC entitlements, so every DLC map
+    # silently becomes unselectable: the Mission Editor shows a dead "Needs DLCs: <name>" row that
+    # highlights but never opens, with no error and no log line. Non-DLC maps still work, which
+    # makes it look mission-specific when it is launch-mode specific. Costly to diagnose, free to
+    # avoid - so the safe mode is the default and callers must opt OUT explicitly.
+    if args.get("via_steam", True):
         try:
             os.path.exists(SOCK) and os.unlink(SOCK)
         except OSError:
@@ -311,7 +316,34 @@ def t_stop(args):
                     pass
     except HarnessError as e:
         return [text("nothing to stop (%s)" % e)]
-    return [text("sent SIGTERM to %s" % (", ".join(killed) or "nothing"))]
+
+    # WAIT for the harness socket to go away before returning. Returning the instant SIGTERM is
+    # sent makes an immediately-following er2_launch fail with
+    #   ConnectionResetError: [Errno 104] Connection reset by peer
+    # because the socket is still being torn down. Reproduced three times in one session; every
+    # occurrence cost a retry and ~30 s. The tool now owns the wait so callers do not have to
+    # guess a sleep.
+    deadline = time.time() + float(args.get("timeout_s", 30))
+    while time.time() < deadline:
+        if not os.path.exists(SOCK):
+            break
+        try:
+            if parse_state(hsend(["STATE"])[0]).get("inner_alive") != "1":
+                break
+        except (HarnessError, OSError):
+            break            # socket gone, refusing, or mid-teardown (BrokenPipe): done
+        time.sleep(0.5)
+    else:
+        return [text("sent SIGTERM to %s, but the harness socket was still up after %ss - "
+                     "wait before relaunching" % (", ".join(killed) or "nothing",
+                                                  args.get("timeout_s", 30)))]
+    time.sleep(1.0)          # brief settle; the unix socket unlink lags the process exit
+    try:
+        os.path.exists(SOCK) and os.unlink(SOCK)
+    except OSError:
+        pass
+    return [text("sent SIGTERM to %s; harness down and socket clear - safe to relaunch"
+                 % (", ".join(killed) or "nothing"))]
 
 
 def t_state(args):
@@ -414,6 +446,43 @@ def _click(x, y, settle=1.0, reliable=True):
     time.sleep(settle)
 
 
+def _log_lines():
+    """Current Player.log length, or 0. Used as a before/after mark."""
+    try:
+        with open(PLAYER_LOG, "rb") as fh:
+            return sum(1 for _ in fh)
+    except OSError:
+        return 0
+
+
+def _verify_playing(mark, settle_s=25.0):
+    """Did the game actually leave the Mission Editor and load the mission?
+
+    Proof: a real mission load re-loads the phase script, which logs 'initial brain sweep' once
+    per load. Editor previews do NOT re-load it, so the marker cannot be faked by editor activity.
+    Returns (ok, reason).
+    """
+    deadline = time.time() + settle_s
+    while time.time() < deadline:
+        try:
+            with open(PLAYER_LOG, "rb") as fh:
+                tail = fh.read().splitlines()[mark:]
+        except OSError:
+            return False, "no Player.log to check"
+        if any(b"initial brain sweep" in ln for ln in tail):
+            return True, ""
+        time.sleep(2.0)
+    try:
+        with open(PLAYER_LOG, "rb") as fh:
+            tail = fh.read().splitlines()[mark:]
+    except OSError:
+        return False, "no Player.log to check"
+    if not any(b"[EVENTS]" in ln or b"[REALISTIC]" in ln for ln in tail):
+        return False, "no mod output at all since the Play click - is the mod deployed?"
+    return False, ("mod is logging but the phase script never re-loaded, which is what an "
+                   "editor preview looks like")
+
+
 def t_play_mission(args):
     """Drive: main menu -> Mission Editor -> pick map row -> pick its mission -> Edit
     mission -> (sigma) -> save panel -> Play. Coordinates are the verified ones above.
@@ -425,6 +494,7 @@ def t_play_mission(args):
     row = int(args.get("map_row", 1))
     load_s = float(args.get("load_s", 75))
     steps = []
+    log_mark = _log_lines()      # for the end-state check below
 
     _click(*UI["menu_mission_editor"], settle=5)
     steps.append("mission editor")
@@ -451,7 +521,24 @@ def t_play_mission(args):
 
     path = os.path.join(TMP, "nav.png")
     hsend(["SCREENSHOT %s" % path])
-    out = [text("navigation steps:\n- " + "\n- ".join(steps))]
+    # VERIFY THE END STATE. This tool used to report "clicked Play" whether or not the game
+    # actually left the Mission Editor, and a swallowed Play click looks identical to success:
+    # phase scripts EXECUTE in the editor, so [REALISTIC]/[EVENTS] lines keep appearing and the
+    # log looks healthy. A whole analysis pass was once run against a battle that never started.
+    #
+    # The check is log-based, so it needs no vision: a real mission load RE-LOADS the phase
+    # script, which prints "initial brain sweep" exactly once per load. Seeing a NEW one after
+    # the Play click is proof the mission actually loaded. (It requires the Realistic phase
+    # script to be deployed; if it is not, we say so rather than claiming success.)
+    verified, why = _verify_playing(log_mark)
+    steps.append("VERIFIED playing" if verified else "NOT VERIFIED: " + why)
+
+    out = [text(("navigation steps:\n- " + "\n- ".join(steps))
+                + ("" if verified else
+                   "\n\nWARNING: could not confirm the game left the Mission Editor (%s).\n"
+                   "Do NOT treat log activity as proof of play - phase scripts run in the editor "
+                   "too. Screenshot to check, and if it is still in the editor drive it manually: "
+                   "Sigma (49,1044) -> Save/Play (380,1044) -> Play (300,184)." % why))]
     if os.path.exists(path):
         out.append(img_content(path, scale_to=int(args.get("scale", 1000))))
     return out
