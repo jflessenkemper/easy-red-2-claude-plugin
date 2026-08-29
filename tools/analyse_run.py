@@ -74,7 +74,7 @@ COVER_ORDERS = {
     "SUPPORT-hold-fire", "ROUT-cover", "ASSAULT-cover",
     "AT-stalk", "AT-hunt",
     "BOUND-move-cover", "BOUND-overwatch",
-    "CREW-onfoot", "RADIO-fire-mission", "DRAG-to-cover",
+    "CREW-onfoot", "RADIO-fire-mission", "DRAG-to-cover", "CONSOLIDATE",
 }
 EXEMPT_ORDERS = {
     "MOUNTED/CREW-defer", "ADVANCE-baseAI",
