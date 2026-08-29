@@ -50,29 +50,34 @@ ERRORS = re.compile(
 # Which labels are an order to MOVE, and which are an order to HOLD. This mapping is the
 # core of the check: a move-order that produces no displacement is a defect.
 MOVE_ORDERS = {
-    "ROAD-MARCH", "ADVANCE-behind-armour", "RALLY-on-MG", "ASSAULT", "ROUT",
-    "RETURN-to-transport", "MEDIC-sortie", "BOUND-move",
-    "BOUND-move-cover", "DRAG-approach", "DRAG-to-cover", "AT-stalk",
-    "ASSAULT-cover",
+    "ROAD-MARCH", "RALLY-on-MG", "ASSAULT", "MEDIC-sortie", "DRAG-approach",
+    "BOUND-move", "ADVANCE-behind-armour", "ROUT", "RETURN-to-transport",
 }
 HOLD_ORDERS = {
-    "REBOARD-transport", "ADVANCE-baseAI", "BOUND-overwatch", "AT-hunt",
-    "CREW-onfoot", "DRAG-pickup", "DRAG-abandon", "RADIO-fire-mission",
+    "DRAG-pickup", "DRAG-abandon", "REBOARD-transport",
 }
 # Cover-seeking orders. `findCover` is a VOID COMMAND whose entire purpose is to RELOCATE the
-# soldier to a cover position (Realistic.lua:747 - "findCover is a command; it moves us into
-# cover"). So displacement under these labels is CORRECT behaviour, not a defect, and a speed
-# threshold cannot judge them: a man sprinting to a wall and a man refusing to move both read
-# as "wrong" against one of the two thresholds. Reported for information, never gated.
-# Classifying these as HOLD_ORDERS produced a false GATE: FAIL on 2026-08-29 across PINNED,
-# FIGHT-from-cover, LEADER-cover, MEDIC-hold-cover and DEFEND-hold simultaneously - which is
-# what exposed the misclassification.
+# soldier to a cover position (Realistic.lua: "findCover is a command; it moves us into cover").
+# Displacement under these labels is therefore CORRECT behaviour, and no speed threshold can
+# judge them: a man sprinting to a wall and a man refusing to move both read as "wrong" against
+# one of the two thresholds. Reported for information, never gated.
+#
+# This set is DERIVED FROM THE CODE, not written by hand. For each label, look at the branch that
+# assigns it and see which command it actually ends in: takeCover -> COVER, orderMove -> MOVE,
+# stop/carryBody -> HOLD, releaseToBaseAI -> EXEMPT. Hand-maintaining it went wrong twice - first
+# classifying PINNED/FIGHT-from-cover/LEADER-cover/MEDIC-hold-cover/DEFEND-hold as holds (they
+# failed as a group, which is what exposed it), then filing AT-stalk and BOUND-move-cover as
+# moves and AT-hunt/BOUND-overwatch/CREW-onfoot/RADIO-fire-mission as holds when every one of
+# them ends in takeCover. Re-derive this list whenever a branch changes its terminal command.
 COVER_ORDERS = {
-    "FIGHT-from-cover", "SUPPORT-hold-fire", "MEDIC-hold-cover", "PINNED",
-    "LEADER-cover", "DEFEND-hold", "ROUT-cover",
+    "PINNED", "FIGHT-from-cover", "LEADER-cover", "MEDIC-hold-cover", "DEFEND-hold",
+    "SUPPORT-hold-fire", "ROUT-cover", "ASSAULT-cover",
+    "AT-stalk", "AT-hunt",
+    "BOUND-move-cover", "BOUND-overwatch",
+    "CREW-onfoot", "RADIO-fire-mission", "DRAG-to-cover",
 }
 EXEMPT_ORDERS = {
-    "MOUNTED/CREW-defer",
+    "MOUNTED/CREW-defer", "ADVANCE-baseAI",
 }
 # Thresholds are in METRES PER SECOND, measured with the mission clock (t=) rather than the
 # sample index, and attributed only to the order that was active while the movement happened.
