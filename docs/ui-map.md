@@ -579,3 +579,41 @@ comparison.
 logged its one-time takeover line, and objective-attraction output *kept growing* (13 → 16 lines)
 while the tick stayed frozen — with **zero Lua or engine errors**. Objective attraction, the
 bail-out queue drain and the fire-mission consumer all survive the phase change now.
+
+## 2026-08-31 — do NOT restart Steam to clear a stuck launch **[V]**
+
+**Symptom chain, in the order it happened:** `er2_launch {"via_steam": true}` timed out after a
+game was killed with SIGTERM (Steam still believed it was running). Restarting Steam to clear that
+made things strictly worse, and three restarts later Steam would not launch the game at all —
+`steam://rungameid/<appid>` spawned **nothing**: no harness, no reaper, no game process.
+
+**How to tell it is Steam and not the harness:** launch in direct mode.
+
+```
+er2_launch {"via_steam": false}
+```
+
+If direct mode comes up (it did, immediately), the harness, the socket path and the game install
+are all fine and the fault is entirely on the Steam side. That one call saves a long detour.
+
+**The tell that confirmed it:** direct mode reached the menu and the GAME itself displayed
+
+```
+Steam not detected.
+Make sure Steam up to date, running and logged in.
+```
+
+So Steam was running as a process but not usable by a game — up, but not logged in or blocked on a
+dialog. Neither is visible from here, because Steam's own window is not inside the harness.
+
+**Rules learned:**
+- A restarted-by-script Steam is not equivalent to the one the desktop session started. Prefer
+  waiting for Steam to settle over restarting it, and never restart it more than once.
+- `steam -shutdown` leaves `steamwebhelper` processes behind; a "clean" restart must clear those
+  too or the new instance comes up degraded.
+- After any Steam restart, re-verify the LaunchOptions before blaming them. Steam rewrites
+  `localconfig.vdf` on exit, so a restart can silently revert them — in this case it did not (the
+  harness wrapper was still present), which is exactly why it was worth checking rather than
+  assuming.
+- If the game must be driven and Steam is uncooperative, non-DLC maps still work in direct mode.
+  Probes that only need *some* soldiers (API identity, handle stability) do not need Donchery.
