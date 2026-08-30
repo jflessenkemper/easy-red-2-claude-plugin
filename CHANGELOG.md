@@ -4,6 +4,44 @@ All notable changes to the **easy-red-2** Claude Code plugin.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-08-30
+
+Reliability pass. Every item here replaces a failure that was silent, misleading, or cost a
+whole verification run.
+
+### Added
+- **`er2_launch` preflight for Steam mode.** Reads the game's Steam `LaunchOptions` and, if the
+  harness does not wrap `%command%`, fails in about a second naming the cause, the repair
+  command, and the direct-mode alternative with its DLC caveat. Previously it waited out the
+  full timeout (default 420 s) and returned `launch timed out after waiting`, which named
+  neither.
+- **`er2_play_mission` verifies its own end state**, reporting `VERIFIED playing`. A swallowed
+  Play click was indistinguishable from success because phase scripts execute in the Mission
+  Editor too, so mod log lines keep appearing. One entire analysis pass was run against a battle
+  that never started.
+- **`tests/`**, which the plugin did not have: `undefined_names.py` fails on a global referenced
+  but never defined or imported — `py_compile` cannot see these, and two shipped inside a single
+  function — plus `check.sh` for syntax, advertised-vs-implemented tools, error text pointing at
+  paths that actually exist, and valid manifests.
+- **README documents all 12 tools** with their real behaviour *and* their limits, both launch
+  modes and what each costs, and the traps worth knowing.
+
+### Changed
+- **`via_steam` now defaults ON.** Without it the game gets no DLC entitlement, so DLC maps
+  become dead `Needs DLCs: <name>` rows that highlight but never open — with no error and no log
+  line, while non-DLC maps still work. Callers must now opt out explicitly.
+- **`er2_stop` waits for teardown** and clears a stale socket before returning, instead of
+  returning the instant SIGTERM was sent. An immediately following `er2_launch` used to fail with
+  `ConnectionResetError`; reproduced three times in one session.
+- **`analyse_run.py` measures pooled per-(soldier, label) speed** instead of contiguous segments,
+  which systematically under-measured and produced false failures; adds a COVER class, because
+  `findCover` RELOCATES a soldier so no speed threshold can judge it; and judges the approach
+  march on **objective closure** rather than pace.
+
+### Fixed
+- `er2_stop` treated `BrokenPipeError` as an error when it means the teardown succeeded.
+- `t_deploy` aborted when an optional source file was absent; optional sources now `SKIP`.
+
 ## [1.0.0] — 2026-08-28
 
 First public release.
