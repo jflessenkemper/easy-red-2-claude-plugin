@@ -488,3 +488,51 @@ Two things that look like bugs here but are not:
 
 **Consequence:** confirming the phase-loop-across-a-battle-boundary question needs a mission that
 actually ENDS. Donchery does; neither of these does.
+
+## 2026-08-30 — the phase loop dies at OBJECTIVE CAPTURE (three fixes had the wrong cause) **[V]**
+
+Measured live on Donchery, twice, with `DEBUG = true` and `PROBE_GLOBALS = true`.
+
+**What actually happens.** Loop-driven output — `obj<N> inv=…`, `alive invaders=…`, `gprobe:` —
+stops dead, while `soldier_died`-driven output (`tally`, `callout`) keeps going for the rest of the
+battle. Run 2: last loop line **15742**, log grew to **85183**. Run 1: last loop line **22266**, log
+grew to **70609**, and a radioman's fire-mission request at line **59018** was never answered.
+
+**The correlation is objective capture, not time and not a phase change:**
+
+| Mission | Objective captured? | Loop cycles before it stopped |
+|---|---|---:|
+| VirtualScene "Testing" | never (`held=false` throughout) | 106+, still running at the end |
+| Donchery run 1 | yes | ~11 |
+| Donchery run 2 | yes | ~11 |
+
+**Three hypotheses are now RULED OUT by evidence, not by argument:**
+1. *An unhandled error in the loop body.* The body is wrapped in a `pcall` that logs
+   `LOOP BODY ERROR`. That line appears **zero** times.
+2. *The engine tears the coroutine down at a phase change.* The phase never advanced — exactly
+   **one** `initial brain sweep`, and `obj1` remained the only objective. Deploying the script as
+   every `phase_<n>.lua` (now the default) did not change the outcome.
+3. *`global` is not shared brain→phase.* Disproved directly: the phase script read the brain's
+   `PROBE_B2P=4242`. Note the FIRST `gprobe` line reads `nil` simply because it runs before any
+   brain has started — sampling it once and concluding "not shared" is a trap, and one that was
+   nearly written up as fact here.
+
+**What that leaves.** The loop's only unprotected statement is `sleep(1)`, which ER2 implements as
+a Unity coroutine (`PauseForSeconds` → `pauseWithCallback` → `Coroutine_Resume`, visible in the
+stack trace attached to every `log()` line). If whatever hosts that coroutine stops resuming it,
+the Lua loop simply never continues: no error, no `idling:` line (the loop is gone before it can
+run its own phase check), and engine-registered callbacks are unaffected because they live
+elsewhere. The capture-time trigger points at the `setAttractor` call that fires when an
+objective's attraction state CHANGES — the one code path a capture newly exercises — but that
+specific call has **not** been isolated, and no exception of any kind appears in the log.
+
+**Consequence for the mod — this is the honest status:**
+- Objective attraction (feature 20) works until the first objective is captured, then stops.
+- The fire-mission consumer (feature 19) and the bail-out queue drain share the loop, so they stop
+  at the same moment. This fully explains why feature 19 has never logged an accept or a refusal
+  in any session: by the time a radioman stalls long enough to call one in, the consumer is gone.
+- Per-soldier brains are NOT affected. They are separate coroutines and keep running all battle —
+  which is why the mod still behaves correctly in every visible respect.
+
+**Do not** claim any of the four wait-and-resume fixes as verified in-game. They are correct as
+logic (the offline harness drives them), but the loop they protect is not alive to use them.

@@ -4,6 +4,29 @@ All notable changes to the **easy-red-2** Claude Code plugin.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — 2026-08-30
+
+### Added
+- **`er2_deploy` installs the phase script as every `phase_<n>.lua`, not just phase 0** (default
+  8, `phases` to change). ER2 runs the script belonging to the CURRENT phase, so a mission that
+  advances past phase 0 with only `phase_0.lua` present has no phase script at all from then on.
+  Each copy reads `MY_PHASE` at load and self-identifies; copies for phases a mission does not
+  have are never loaded.
+
+### Documented
+- **`docs/ui-map.md`: the phase-script loop dies at OBJECTIVE CAPTURE**, with the evidence table.
+  Measured twice on Donchery: loop-driven output stops (run 1 at log line 22266 of 70609, run 2 at
+  15742 of 85183) while `soldier_died` output continues all battle, which is why it has always
+  looked healthy. Three earlier diagnoses are ruled out by evidence — no `LOOP BODY ERROR` ever
+  logged, the phase never advanced (so it is not phase teardown, and the all-phases deploy above
+  did not change it), and `global` IS shared brain→phase (the phase read the brain's
+  `PROBE_B2P=4242`). Control: VirtualScene never captures anything and its loop ran 106+ cycles.
+  The remaining suspect — `sleep()` being a Unity coroutine that stops being resumed — is recorded
+  as a hypothesis, explicitly not as cause, because no exception appears anywhere in the log.
+- **A sampling trap worth knowing:** the first `gprobe` line reads `nil` because it runs before any
+  brain has started. Sampling it once and concluding "globals are not shared" was nearly written up
+  here as fact.
+
 ## [1.2.0] — 2026-08-30
 
 Findings pass. Both entries below are traps that presented as "the tool is broken" or "the game

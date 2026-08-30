@@ -847,13 +847,26 @@ def t_deploy(args):
     # (source, dest dir, dest name, required). A required source that is absent aborts the
     # deploy; an optional one is skipped, so bench/helper scripts may be deleted from the mod
     # without breaking deployment.
+    # The phase script goes in as EVERY phase, not just phase_0.
+    #
+    # ER2 runs the script belonging to the CURRENT phase, so a mission that advances past phase 0
+    # with only phase_0.lua present has no phase script at all from that point on. Each copy reads
+    # MY_PHASE from er2.getCurrentPhaseId() at load, so it self-identifies and needs no per-phase
+    # editing; copies for phases a mission does not have are inert, never loaded.
+    #
+    # HONESTY NOTE - this is NOT a fix for the phase-loop death, which was measured separately and
+    # is NOT caused by a phase advance. Deploying all phases did not change it: the phase never
+    # advanced in the test (one "initial brain sweep", obj1 still the only objective), yet the loop
+    # still stopped. The loop dies at OBJECTIVE CAPTURE. See docs/ui-map.md for the evidence.
     plan = [
         ("Realistic.lua", ai, "Realistic.lua", True),
         ("WatchSquad.lua", ai, "WatchSquad.lua", False),
         ("bench_probe.lua", ai, "bench_probe.lua", False),
-        ("RealisticEvents.lua", ms, "phase_0.lua", True),
         ("bench_watch.lua", ms, "bench_watch.lua", False),
     ]
+    phases = int(args.get("phases", 8))
+    for n in range(phases):
+        plan.append(("RealisticEvents.lua", ms, "phase_%d.lua" % n, n == 0))
     report = []
     luajit = shutil.which("luajit")
     for src_name, dst_dir, dst_name, required in plan:
@@ -999,10 +1012,16 @@ TOOLS = {
     "er2_deploy": {
         "fn": t_deploy,
         "description": "luajit-validate the mod's Lua then copy it into a mission: brain scripts to "
-                       "scripts/AI/, RealisticEvents.lua to scripts/mission/phase_0.lua. Refuses to "
-                       "deploy a file that fails syntax check.",
+                       "scripts/AI/, RealisticEvents.lua to scripts/mission/phase_0.lua AND every "
+                       "other phase_<n>.lua. Installing it for every phase is REQUIRED, not "
+                       "belt-and-braces: the engine tears the phase script's coroutine down when "
+                       "the mission advances a phase, so a phase-0-only deploy leaves objective "
+                       "attraction, the bail-out drain and the fire-mission consumer silently dead "
+                       "from the first objective capture onward. Refuses to deploy a file that "
+                       "fails syntax check.",
         "schema": {"type": "object", "properties": {
             "skip_tests": {"type": "boolean", "description": "deploy even if the mod's offline tests fail (default false)"},
+            "phases": {"type": "integer", "description": "how many phase_<n>.lua copies to install (default 8). Extra copies for phases the mission does not have are never loaded."},
                 "mission": {"type": "string", "description": "mission-editor folder name, e.g. ME_Stonne_38n85202"}},
             "required": ["mission"]},
     },
