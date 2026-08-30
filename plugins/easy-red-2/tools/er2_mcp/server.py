@@ -27,6 +27,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -100,6 +101,10 @@ PLAYER_LOG = os.path.join(CFG, "Player.log")
 MISSION_DIR = os.path.join(CFG, "mission_editor")
 MOD_SRC = os.environ.get("ER2_MOD_SRC") or os.path.join(HOME, "er2-realistic")
 TMP = os.environ.get("ER2_TMP", "/tmp/er2_mcp")
+# repo root, so error text can point at tools/ scripts by real path rather than a guess.
+# server.py lives at <root>/plugins/easy-red-2/tools/er2_mcp/server.py
+PLUGIN_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                           "..", "..", "..", ".."))
 os.makedirs(TMP, exist_ok=True)
 
 # Win32 VK codes — the harness maps VK -> evdev (src/harness/harness_input.cpp).
@@ -201,6 +206,63 @@ def text(s):
 
 
 # ---------------------------------------------------------------- tools
+def _steam_launch_options():
+    """Return (found, value) for Easy Red 2's Steam LaunchOptions.
+
+    found=False means no localconfig.vdf or no entry for the app at all.
+    The value is what Steam will prepend to the game command; the harness only gets injected
+    when it wraps %command% in there.
+    """
+    import glob as _glob
+    pats = [os.path.expanduser("~/.local/share/Steam/userdata/*/config/localconfig.vdf"),
+            os.path.expanduser("~/.steam/steam/userdata/*/config/localconfig.vdf")]
+    for pat in pats:
+        for path in _glob.glob(pat):
+            try:
+                txt = open(path, "r", errors="replace").read()
+            except OSError:
+                continue
+            i = txt.find('"%s"' % APPID)
+            if i < 0:
+                continue
+            m = re.search(r'"LaunchOptions"\s*"([^"]*)"', txt[i:i + 4000])
+            if m:
+                return True, m.group(1)
+            return True, ""
+    return False, ""
+
+
+def _preflight_steam(args):
+    """Fail FAST when Steam mode is impossible, instead of timing out for minutes.
+
+    Steam mode works ONLY if the harness already wraps %command% in the game's Steam Launch
+    Options - that is the sole mechanism that gets the game running inside the harness while
+    still receiving a Steam app ticket (which is what makes owned DLC visible). With the
+    options cleared, Steam launches the game bare: no socket ever appears and er2_launch used
+    to sit there for the full timeout and then say "launch timed out after waiting", which
+    names neither the cause nor the fix.
+    Returns an error string, or None if Steam mode looks viable.
+    """
+    found, opts = _steam_launch_options()
+    if not found:
+        return ("no Steam LaunchOptions entry found for app %s. Steam mode cannot inject the "
+                "harness." % APPID)
+    if "%command%" not in opts or "arness" not in opts:
+        return ("Steam LaunchOptions for app %s do not wrap the harness around %%command%% "
+                "(currently: %r).\n"
+                "Steam mode CANNOT work without it - Steam would launch the game bare and no "
+                "harness socket would ever appear.\n"
+                "FIX:  close Steam, then run\n"
+                "        python3 %s/tools/fix_steam_launch_options.py --apply\n"
+                "      (dry-runs by default, backs up localconfig.vdf, and refuses to run while "
+                "Steam is open because Steam overwrites the file on exit)\n"
+                "ALTERNATIVE: er2_launch {\"via_steam\": false} works with no launch options at "
+                "all - the plugin runs the harness itself - BUT the game then gets no DLC "
+                "entitlement, so DLC maps show a dead \"Needs DLCs: <name>\" row and will not "
+                "open." % (APPID, opts, PLUGIN_ROOT))
+    return None
+
+
 def t_launch(args):
     width = int(args.get("width", 1920))
     height = int(args.get("height", 1080))
@@ -224,6 +286,9 @@ def t_launch(args):
     # makes it look mission-specific when it is launch-mode specific. Costly to diagnose, free to
     # avoid - so the safe mode is the default and callers must opt OUT explicitly.
     if args.get("via_steam", True):
+        problem = _preflight_steam(args)
+        if problem:
+            return [text("er2_launch PREFLIGHT FAILED (nothing was launched):\n\n" + problem)]
         try:
             os.path.exists(SOCK) and os.unlink(SOCK)
         except OSError:

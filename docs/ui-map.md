@@ -382,3 +382,32 @@ code. Two verification runs were wasted this way.
 checking for a NEW `initial brain sweep` line after your log mark — that line is the only
 reliable proof the phase script actually re-loaded. Brain (`Realistic.lua`) changes do reload per
 battle, because brains are re-attached to freshly spawned soldiers.
+
+## 2026-08-30 — Steam LaunchOptions are the ONLY thing that makes Steam mode work
+
+**The two launch modes are not interchangeable, and each loses something:**
+
+| Mode | Needs Steam LaunchOptions? | Harness? | DLC entitlement? |
+|---|---|---|---|
+| `er2_launch {"via_steam": true}` (default) | **YES** — must wrap the harness around `%command%` | yes, injected by Steam | **yes** |
+| `er2_launch {"via_steam": false}` | no — the plugin runs `HARNESS … -- GAME_BIN` itself | yes | **NO** |
+
+So the harness works perfectly well with no launch options at all — but the game then gets no
+Steam app ticket, every DLC map shows a dead `Needs DLCs: <name>` row, and a DLC mission simply
+cannot be opened. Donchery is on Stonne, which needs Ardennes, so direct mode cannot test it.
+
+**Failure mode when the options are cleared:** Steam launches the game bare, no harness socket
+ever appears, and `er2_launch` used to sit for the whole `timeout_s` (default 420 s) and then
+return `launch timed out after waiting`, naming neither the cause nor the fix.
+
+**Fixed 2026-08-30:** `er2_launch` now PREFLIGHTS the Steam path. It reads `LaunchOptions` out of
+`localconfig.vdf`, and if the harness does not wrap `%command%` it fails in about a second with
+the cause, the repair command, and the direct-mode alternative plus its DLC caveat. Nothing is
+launched.
+
+**Repair:** close Steam first — it holds an exclusive write lock on `localconfig.vdf` and will
+overwrite the edit on exit — then:
+```
+python3 <repo>/tools/fix_steam_launch_options.py --apply
+```
+It dry-runs by default, backs the file up, and refuses to run while Steam is open.
