@@ -411,3 +411,80 @@ overwrite the edit on exit — then:
 python3 <repo>/tools/fix_steam_launch_options.py --apply
 ```
 It dry-runs by default, backs the file up, and refuses to run while Steam is open.
+
+---
+
+## 2026-08-30 — a missing Workshop item HANGS the editor hub forever **[V]**
+
+**Symptom:** the editor hub sits on **"LOADING Workshop campaigns"** indefinitely. The mission
+list never renders, so `er2_missions`' UI path and `er2_play_mission` cannot work. The game stays
+fully responsive and shows no error dialog, so it reads as "slow" rather than "broken" — the first
+attempt here was to just wait it out, twice.
+
+**Cause:** the hub enumerates the Workshop items Steam believes are installed and opens each one's
+content directory. A missing directory throws `DirectoryNotFoundException` *inside* the
+enumeration, killing the loading coroutine.
+
+```
+DirectoryNotFoundException: Could not find a part of the path
+  '~/.local/share/Steam/steamapps/workshop/content/1324780/<id>'
+```
+
+**Two traps in reading that log line:**
+- The enumeration **aborts at the first bad item**, so the log names exactly ONE id even when
+  several are missing. Do not treat it as the complete list.
+- The item is still *subscribed*; only its content is gone. Deleting or renaming the directory does
+  not unsubscribe it, so the game keeps trying.
+
+**Cause seen here:** three Windows-only mods had been sidelined by renaming them to `<id>.disabled`
+to stop them spamming errors. That quarantine is what broke the hub. Restoring all three
+(`mv <id>.disabled <id>`) fixed it immediately — the hub then loaded clean on the next launch.
+Other routes to the same state: an interrupted Steam download, or content deleted while subscribed.
+
+**Fixed 2026-08-30:** `er2_launch` (both modes) and the `er2_play_mission` failure path now run
+`_preflight_workshop()`, which diffs `WorkshopItemsInstalled` in `appworkshop_1324780.acf` against
+the directories actually present and warns with every missing id — flagging any it finds as
+`<id>.disabled` with the exact rename to undo. It is a WARNING, never a block: the game itself
+boots fine and only the editor hub is affected.
+
+**Fix for a user:** restore the directories, or unsubscribe the items in Steam so the game stops
+enumerating them.
+
+## 2026-08-30 — mission-list rows TOGGLE; never double-click them **[V]**
+
+`er2_click {"reliable": true}` sends the click **twice** (it exists because some buttons swallow a
+single click). Mission-list rows are toggles, so a "reliable" click expands the row and then
+collapses it again — the row highlights but its sub-row never appears, which looks exactly like
+"the mission failed to open". Two double-clicks in a row left it collapsed both times here.
+
+**Rule:** map rows and mission sub-rows take `{"reliable": false}`. This is why `t_play_mission`
+passes `reliable=False` for both list clicks and `True` almost everywhere else.
+
+Selecting a map expands ONE sub-row beneath it (pitch 52), and that sub-row is one of:
+- the mission name + belligerent flags → clickable, opens the mission dialog;
+- `Needs DLCs: <name>` → **inert**, and the definitive on-screen signal that the map is DLC-gated.
+  In direct-launch mode *every* DLC map shows this, so it is also how to confirm at a glance that
+  the game has no entitlement.
+
+## 2026-08-30 — picking a fallback test mission: what "playable" is not **[V]**
+
+With DLC entitlement unavailable, the two non-DLC local missions were tried as substitutes. Neither
+can verify AI behaviour, and both fail in ways that look like success at first:
+
+| Mission | Loads? | Why it cannot verify behaviour |
+|---|---|---|
+| `VirtualScene` / "Testing" | yes | 6 v 6, **all AT class**, on a flat featureless plane; both sides lock into mutual `PINNED` at 14–21 m and never resolve. Deaths occur (`tally invaders:6 defenders:2`) but `alive` stays 6 v 6 — the mission **respawns**, so the battle never ends and no phase change ever happens. |
+| `Realistic Test map` | no | `Needs DLCs: Hungary`. |
+
+Two things that look like bugs here but are not:
+
+- **`initial brain sweep: 0 soldier(s)` is normal.** The phase script loads *before* the battle
+  spawns anyone, so the one-shot sweep legitimately finds nobody; every soldier is picked up
+  afterwards by the `soldier_spawned` callback. A zero here is not a failure to attach.
+- **`brain attached to 3 soldier(s)` being the last such line does not mean only 3 attached.** That
+  log is sampled (`attached <= 3 or attached % 25 == 0`), so it is silent between 4 and 24.
+  Likewise only ~1 soldier in 6 emits decision traces (`DBG_SAMPLE = 6`), so counting distinct uids
+  in the log undercounts brains by design. Neither number is an attach count.
+
+**Consequence:** confirming the phase-loop-across-a-battle-boundary question needs a mission that
+actually ENDS. Donchery does; neither of these does.

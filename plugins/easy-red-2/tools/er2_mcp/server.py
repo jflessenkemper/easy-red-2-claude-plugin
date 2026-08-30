@@ -232,6 +232,65 @@ def _steam_launch_options():
     return False, ""
 
 
+def _workshop_gaps():
+    """Workshop items Steam thinks are installed but whose content directory is missing.
+
+    Why this matters: the editor hub enumerates installed Workshop items and reads each one's
+    directory. A missing directory throws DirectoryNotFoundException INSIDE the enumeration, which
+    kills the loading coroutine - the hub then sits on "LOADING Workshop campaigns" forever and the
+    mission list never appears. There is no error dialog and the game stays responsive, so it reads
+    as "slow" rather than "broken"; it cost a full debugging detour here.
+
+    Note the enumeration ABORTS at the first bad item, so the log names only ONE id even when
+    several are missing - do not treat the log as the complete list. This returns all of them.
+
+    Common causes: an interrupted Steam download, a manually renamed/moved item (the classic being
+    <id>.disabled, used to sideline a broken mod), or content deleted while still subscribed.
+    Returns a list of missing ids (possibly empty).
+    """
+    acf = os.path.join(HOME, ".local/share/Steam/steamapps/workshop",
+                       "appworkshop_%s.acf" % APPID)
+    content = os.path.join(HOME, ".local/share/Steam/steamapps/workshop/content", APPID)
+    try:
+        txt = open(acf, "r", errors="replace").read()
+    except OSError:
+        return []
+    i = txt.find('"WorkshopItemsInstalled"')
+    if i < 0:
+        return []
+    # Stop at the sibling section so we do not also match ids from WorkshopItemDetails.
+    j = txt.find('"WorkshopItemDetails"', i)
+    installed = re.findall(r'^\s*"(\d{6,})"\s*$', txt[i:j if j > 0 else len(txt)], re.M)
+    return [w for w in installed if not os.path.isdir(os.path.join(content, w))]
+
+
+def _preflight_workshop():
+    """Warning text for missing Workshop content, or None. Never blocks a launch: the game boots
+    fine and only the EDITOR HUB hangs, so this must not stop someone doing non-editor work."""
+    gaps = _workshop_gaps()
+    if not gaps:
+        return None
+    content = os.path.join(HOME, ".local/share/Steam/steamapps/workshop/content", APPID)
+    lines = ["WARNING: %d subscribed Workshop item(s) have no content directory:" % len(gaps)]
+    for w in gaps[:8]:
+        alt = os.path.join(content, w + ".disabled")
+        lines.append("  %s%s" % (w, "   (found %s.disabled - just rename it back)" % w
+                                 if os.path.isdir(alt) else ""))
+    if len(gaps) > 8:
+        lines.append("  ... and %d more" % (len(gaps) - 8))
+    lines.append("The Mission Editor hub will HANG on 'LOADING Workshop campaigns' and the mission "
+                 "list will never appear, so er2_play_mission/er2_missions cannot work.")
+    lines.append("FIX: restore the directories (rename any *.disabled back), or unsubscribe the "
+                 "items in Steam so the game stops enumerating them.")
+    return "\n".join(lines)
+
+
+def _with_workshop_warning(msg):
+    """Append the Workshop-integrity warning to a launch result, if there is one."""
+    warn = _preflight_workshop()
+    return msg + "\n\n" + warn if warn else msg
+
+
 def _preflight_steam(args):
     """Fail FAST when Steam mode is impossible, instead of timing out for minutes.
 
@@ -304,8 +363,9 @@ def t_launch(args):
                 try:
                     st = parse_state(hsend(["STATE"])[0])
                     if st.get("ready") == "1" and st.get("inner_alive") == "1":
-                        return [text("launched via Steam (DLC entitlements available). STATE=%s"
-                                     % json.dumps(st))]
+                        msg = ("launched via Steam (DLC entitlements available). STATE=%s"
+                               % json.dumps(st))
+                        return [text(_with_workshop_warning(msg))]
                 except HarnessError:
                     pass
             time.sleep(3)
@@ -360,7 +420,10 @@ def t_launch(args):
                 st = parse_state(hsend(["STATE"])[0])
                 last = json.dumps(st)
                 if st.get("ready") == "1" and st.get("inner_alive") == "1":
-                    return [text("launched harness pid=%s; game ready. STATE=%s" % (p.pid, last))]
+                    msg = ("launched harness pid=%s; game ready. STATE=%s" % (p.pid, last)
+                           + "\nNOTE: direct mode gets NO DLC entitlement - DLC maps show a dead "
+                             "\"Needs DLCs: <name>\" sub-row in the mission list and will not open.")
+                    return [text(_with_workshop_warning(msg))]
             except HarnessError as e:
                 last = str(e)
         time.sleep(2)
@@ -598,12 +661,22 @@ def t_play_mission(args):
     verified, why = _verify_playing(log_mark)
     steps.append("VERIFIED playing" if verified else "NOT VERIFIED: " + why)
 
-    out = [text(("navigation steps:\n- " + "\n- ".join(steps))
-                + ("" if verified else
-                   "\n\nWARNING: could not confirm the game left the Mission Editor (%s).\n"
-                   "Do NOT treat log activity as proof of play - phase scripts run in the editor "
-                   "too. Screenshot to check, and if it is still in the editor drive it manually: "
-                   "Sigma (49,1044) -> Save/Play (380,1044) -> Play (300,184)." % why))]
+    body = "navigation steps:\n- " + "\n- ".join(steps)
+    if not verified:
+        body += ("\n\nWARNING: could not confirm the game left the Mission Editor (%s).\n"
+                 "Do NOT treat log activity as proof of play - phase scripts run in the editor "
+                 "too. Screenshot to check, and if it is still in the editor drive it manually: "
+                 "Sigma (49,1044) -> Save/Play (380,1044) -> Play (300,184)." % why)
+        # Two silent causes look identical from here, so name both rather than only the clicks:
+        # a hung Workshop enumeration (mission list never renders), and a DLC-gated map (the
+        # mission sub-row is replaced by a dead "Needs DLCs: <name>" label that cannot be clicked).
+        warn = _preflight_workshop()
+        if warn:
+            body += "\n\n" + warn
+        body += ("\n\nALSO CHECK: if the map needs a DLC and the game was launched with "
+                 "er2_launch {\"via_steam\": false}, the mission sub-row reads "
+                 "\"Needs DLCs: <name>\" and is inert. Relaunch via Steam.")
+    out = [text(body)]
     if os.path.exists(path):
         out.append(img_content(path, scale_to=int(args.get("scale", 1000))))
     return out

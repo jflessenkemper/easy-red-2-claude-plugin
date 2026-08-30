@@ -80,6 +80,22 @@ for f in plugins/easy-red-2/.claude-plugin/plugin.json plugins/easy-red-2/.mcp.j
   fi
 done
 
+echo "== 6. plugin.json version matches the newest CHANGELOG entry =="
+# These drifted once already: 1.1.0 was written up in the CHANGELOG and tagged, while
+# plugin.json still advertised 1.0.0. Nothing failed, so nobody noticed - the manifest version
+# is what a user actually installs and sees, so a stale one misreports which build they have.
+python3 - <<'PY'
+import json, re, sys
+man = json.load(open("plugins/easy-red-2/.claude-plugin/plugin.json")).get("version")
+m = re.search(r'^## \[([0-9]+\.[0-9]+\.[0-9]+)\]', open("CHANGELOG.md").read(), re.M)
+top = m.group(1) if m else None
+if man != top:
+    print("  \033[31mFAIL\033[0m  plugin.json=%s but newest CHANGELOG entry=%s" % (man, top))
+    sys.exit(1)
+print("  \033[32mPASS\033[0m  plugin.json and CHANGELOG agree on %s" % man)
+PY
+[ $? -eq 0 ] && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
+
 echo
 echo "-------------------------------------------"
 printf 'PASS %d   FAIL %d\n' "$PASS" "$FAIL"

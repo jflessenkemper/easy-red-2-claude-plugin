@@ -4,6 +4,39 @@ All notable changes to the **easy-red-2** Claude Code plugin.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-08-30
+
+Findings pass. Both entries below are traps that presented as "the tool is broken" or "the game
+is just slow", and each cost real time before being understood.
+
+### Added
+- **Workshop-integrity preflight.** A Workshop item that Steam lists as installed but whose
+  content directory is missing throws inside the editor hub's enumeration, killing the loading
+  coroutine: the hub sits on *"LOADING Workshop campaigns"* forever, the mission list never
+  renders, and `er2_play_mission` cannot work. There is no error dialog and the game stays
+  responsive, so it reads as slowness. `er2_launch` (both modes) and the `er2_play_mission`
+  failure path now diff `WorkshopItemsInstalled` against the directories actually present and
+  warn with **every** missing id — the game's own log names only the first, because the
+  enumeration aborts there. Items sidelined as `<id>.disabled` are called out with the exact
+  rename that undoes it. Warning only, never a block: only the editor hub is affected.
+
+### Changed
+- **Direct-mode launches now state the DLC consequence up front**, instead of leaving it to be
+  rediscovered when a mission will not open. Confirmed on-screen this time rather than inferred:
+  a DLC-gated map's mission sub-row is replaced by an inert `Needs DLCs: <name>` label. SteamAPI
+  *does* initialise in direct mode, so a successful Steam init is not evidence of entitlement.
+- **`er2_play_mission`'s failure text names both silent causes** — a hung Workshop enumeration
+  and a DLC-gated map — rather than only suggesting manual clicks.
+
+### Documented
+- `docs/ui-map.md`: the Workshop hang; mission-list rows are **toggles**, so they need
+  `{"reliable": false}` (a double-click expands then collapses, which looks identical to the
+  mission failing to open); `Needs DLCs: <name>` as the definitive DLC signal; and why neither
+  non-DLC local mission can substitute for Donchery when verifying AI behaviour.
+- Two counting traps that nearly became false bug reports: `initial brain sweep: 0 soldier(s)` is
+  correct (the phase script loads before anyone spawns), and the `brain attached to N` line is
+  sampled, so it is silent between 4 and 24 and is not an attach count.
+
 ## [1.1.0] — 2026-08-30
 
 Reliability pass. Every item here replaces a failure that was silent, misleading, or cost a
