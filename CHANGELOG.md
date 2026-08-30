@@ -28,6 +28,24 @@ is just slow", and each cost real time before being understood.
 - **`er2_play_mission`'s failure text names both silent causes** — a hung Workshop enumeration
   and a DLC-gated map — rather than only suggesting manual clicks.
 
+### Fixed
+- **The Steam LaunchOptions reader picked the wrong match and reported the options as empty.**
+  The app id appears many times in `localconfig.vdf`, mostly inside base64/hex token blobs on
+  lines like `"1324780"  "3e0000..."`. Taking the first raw occurrence landed in one of those,
+  found no `LaunchOptions` nearby, and concluded there were none - so the preflight told the user
+  to run a repair they had **just successfully run**, and refused to launch. It now matches the id
+  as a KEY (alone on its line) and falls back to a loose scan, so a genuinely empty entry is still
+  reported as empty.
+- **`er2_play_mission` blamed deployment for a silence it should expect.** The mod ships with
+  `DEBUG = false`, which gates every diagnostic line, so a correctly deployed *shipping* build is
+  silent and the "initial brain sweep" marker can never appear. The tool said "no mod output at
+  all - is the mod deployed?", sending you to re-deploy something already correct. It now detects
+  a deployed `DEBUG = false` and says the check cannot confirm play either way, which is the
+  honest answer.
+- **`er2_play_mission`'s failure text now names the splash screen first.** It assumes the main
+  menu; on "Press Space or Start" every click is swallowed while all navigation steps still
+  report OK. That exact sequence wasted two full mission-load attempts.
+
 ### Documented
 - `docs/ui-map.md`: the Workshop hang; mission-list rows are **toggles**, so they need
   `{"reliable": false}` (a double-click expands then collapses, which looks identical to the

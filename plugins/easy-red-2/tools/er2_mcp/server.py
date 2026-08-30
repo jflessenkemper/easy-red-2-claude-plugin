@@ -222,12 +222,23 @@ def _steam_launch_options():
                 txt = open(path, "r", errors="replace").read()
             except OSError:
                 continue
-            i = txt.find('"%s"' % APPID)
-            if i < 0:
+            # The app id appears MANY times in this file, and most are not the Apps entry: it also
+            # shows up inside base64/hex token blobs on lines like `"1324780"  "3e0000...."`. Taking
+            # the FIRST raw occurrence found one of those blobs, saw no LaunchOptions within it, and
+            # reported the options as empty - so the preflight told the user to run a repair they
+            # had just successfully run. The real entry is a KEY: the id alone on its line, with the
+            # block following it. Match that shape, and only fall back to a loose scan if it is
+            # absent, so a genuinely empty entry is still reported as empty.
+            starts = [m.start() for m in
+                      re.finditer(r'^[ \t]*"%s"[ \t]*$' % APPID, txt, re.M)]
+            if not starts:
+                starts = [m.start() for m in re.finditer(r'"%s"' % APPID, txt)]
+            if not starts:
                 continue
-            m = re.search(r'"LaunchOptions"\s*"([^"]*)"', txt[i:i + 4000])
-            if m:
-                return True, m.group(1)
+            for i in starts:
+                m = re.search(r'"LaunchOptions"\s*"([^"]*)"', txt[i:i + 4000])
+                if m:
+                    return True, m.group(1)
             return True, ""
     return False, ""
 
@@ -606,9 +617,46 @@ def _verify_playing(mark, settle_s=25.0):
     except OSError:
         return False, "no Player.log to check"
     if not any(b"[EVENTS]" in ln or b"[REALISTIC]" in ln for ln in tail):
+        # "Silent" has TWO causes and they need opposite responses. The mod ships with
+        # DEBUG = false, which gates every dbg()/logonly() line - so a correctly deployed
+        # SHIPPING build is legitimately silent and this check can never pass. Saying
+        # "is the mod deployed?" there sends you to re-deploy something that is already fine.
+        quiet = _deployed_debug_off(args_mission=None)
+        if quiet:
+            return False, ("no mod output - but the deployed build has DEBUG = false, so it is "
+                           "SILENT BY DESIGN and this check cannot confirm play either way. "
+                           "This is not evidence of a problem. Screenshot to confirm, or deploy a "
+                           "verification build with DEBUG = true if you need the log markers")
         return False, "no mod output at all since the Play click - is the mod deployed?"
     return False, ("mod is logging but the phase script never re-loaded, which is what an "
                    "editor preview looks like")
+
+
+def _deployed_debug_off(args_mission=None):
+    """True if a deployed phase script has DEBUG = false (so the mod logs nothing).
+
+    Checks every mission's scripts/mission/phase_0.lua rather than guessing which one is loaded:
+    if they all ship quiet, silence explains itself.
+    """
+    found_any, all_quiet = False, True
+    try:
+        names = os.listdir(MISSION_DIR)
+    except OSError:
+        return False
+    for name in names:
+        p = os.path.join(MISSION_DIR, name, "scripts", "mission", "phase_0.lua")
+        if not os.path.isfile(p):
+            continue
+        try:
+            head = open(p, "r", errors="replace").read(4000)
+        except OSError:
+            continue
+        if not re.search(r'^local DEBUG\s*=', head, re.M):
+            continue
+        found_any = True
+        if not re.search(r'^local DEBUG\s*=\s*false', head, re.M):
+            all_quiet = False
+    return found_any and all_quiet
 
 
 def t_play_mission(args):
@@ -673,7 +721,13 @@ def t_play_mission(args):
         warn = _preflight_workshop()
         if warn:
             body += "\n\n" + warn
-        body += ("\n\nALSO CHECK: if the map needs a DLC and the game was launched with "
+        body += ("\n\nALSO CHECK, in the order these actually happen:"
+                 "\n1. STILL ON THE SPLASH? This tool assumes the MAIN MENU. On the "
+                 "\"Press Space or Start\" screen every click is swallowed and all steps above "
+                 "report OK while nothing happened. Send er2_key {\"key\": \"space\"}, confirm the "
+                 "main menu with a screenshot, then retry. A single space can be missed while the "
+                 "game is still loading, so verify rather than assuming."
+                 "\n2. DLC-GATED MAP? If the map needs a DLC and the game was launched with "
                  "er2_launch {\"via_steam\": false}, the mission sub-row reads "
                  "\"Needs DLCs: <name>\" and is inert. Relaunch via Steam.")
     out = [text(body)]
