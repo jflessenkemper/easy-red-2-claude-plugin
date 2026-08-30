@@ -657,12 +657,62 @@ def t_log(args):
     return [text("%d matching lines (showing last %d):\n%s" % (total, len(tail), "\n".join(tail)))]
 
 
+def _run_offline_tests():
+    """Run the mod's offline harnesses, if it ships any, BEFORE deploying.
+
+    Syntax validation was never enough: every silent bug this mod has shipped parsed perfectly.
+    rosterIndex() compiled to a nil global and killed the brain; safe() was a nil global in the
+    phase script; the phase loop deadlocked. None was a syntax error, and Easy Red 2 does not
+    surface a coroutine death as a Lua error, so all of them reached a real battle and showed
+    only silence there.
+
+    The harnesses execute the scripts against a stubbed runtime and cost milliseconds. Deploying
+    a build that fails them means knowingly starting a ~15-minute battle that cannot work.
+    Returns an error string, or None.
+    """
+    lua = shutil.which("luajit")
+    if not lua:
+        return None                      # no luajit: syntax check already handled elsewhere
+    failures = []
+    for name in ("tests/offline_brain.lua", "tests/offline_phase.lua"):
+        path = os.path.join(MOD_SRC, name)
+        if not os.path.exists(path):
+            continue                     # the mod does not ship this harness
+        try:
+            r = subprocess.run([lua, name], cwd=MOD_SRC, capture_output=True,
+                               text=True, timeout=60)
+        except Exception as e:
+            failures.append("%s could not run: %s" % (name, e))
+            continue
+        if r.returncode != 0:
+            # Show the FAILING lines, not the tail. The tail is mostly passes, so a naive
+            # [-8:] hid the actual failure behind a wall of green - an error message that
+            # does not show the error.
+            all_lines = (r.stdout + r.stderr).strip().splitlines()
+            bad_lines = [l for l in all_lines if "FAIL" in l or "ERROR" in l]
+            summary = [l for l in all_lines if "PASS " in l and "FAIL" in l]
+            shown = (bad_lines[:6] or all_lines[-4:]) + summary[-1:]
+            seen, shown = set(), [l for l in shown if not (l in seen or seen.add(l))]
+            failures.append("%s FAILED:\n    %s" % (name, "\n    ".join(shown)))
+    if failures:
+        return ("offline tests failed - NOT deploying, because a battle cannot verify what the "
+                "desk already says is broken:\n\n" + "\n\n".join(failures))
+    return None
+
+
 def t_deploy(args):
     mission = str(args["mission"])
     mdir = os.path.join(MISSION_DIR, mission)
     if not os.path.isdir(mdir):
         avail = sorted(os.listdir(MISSION_DIR)) if os.path.isdir(MISSION_DIR) else []
         return [text("no such mission %r. available: %s" % (mission, avail))]
+    # Gate on the mod's own offline tests before touching the mission. Skippable with
+    # skip_tests=true for the rare case of deliberately deploying a known-broken build to
+    # reproduce something.
+    if not args.get("skip_tests"):
+        problem = _run_offline_tests()
+        if problem:
+            return [text("er2_deploy REFUSED (nothing was copied):\n\n" + problem)]
     ai = os.path.join(mdir, "scripts", "AI")
     ms = os.path.join(mdir, "scripts", "mission")
     os.makedirs(ai, exist_ok=True)
@@ -825,7 +875,8 @@ TOOLS = {
                        "scripts/AI/, RealisticEvents.lua to scripts/mission/phase_0.lua. Refuses to "
                        "deploy a file that fails syntax check.",
         "schema": {"type": "object", "properties": {
-            "mission": {"type": "string", "description": "mission-editor folder name, e.g. ME_Stonne_38n85202"}},
+            "skip_tests": {"type": "boolean", "description": "deploy even if the mod's offline tests fail (default false)"},
+                "mission": {"type": "string", "description": "mission-editor folder name, e.g. ME_Stonne_38n85202"}},
             "required": ["mission"]},
     },
     "er2_missions": {
