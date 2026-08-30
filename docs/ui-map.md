@@ -536,3 +536,46 @@ specific call has **not** been isolated, and no exception of any kind appears in
 
 **Do not** claim any of the four wait-and-resume fixes as verified in-game. They are correct as
 logic (the offline harness drives them), but the loop they protect is not alive to use them.
+
+## 2026-08-30 (later) — CORRECTION + FIX: it *is* the phase change, and a watchdog solves it
+
+**The section above named the wrong cause. Read this one instead.**
+
+### What tracing showed
+Per-tick `top`/`pre-sleep`/`post-sleep` markers were added to the loop. The last line ever logged
+is `trace tick=47 pre-sleep` with **no matching `post-sleep`**, and the tick never advances again —
+still 47 two minutes later. So the loop body completes fine and **`sleep(1)` never returns**. ER2
+implements sleep as a Unity coroutine (`PauseForSeconds` → `pauseWithCallback` → `Coroutine_Resume`),
+and the Lua coroutine is simply abandoned mid-sleep.
+
+### Why "objective capture" was the wrong conclusion
+Deploying the script as every `phase_<n>.lua` made the engine say what was really happening:
+
+```
+Lua error at 'phase_1.lua': Object reference not set to an instance of an object.
+  BattleManager:TryExecutingPhaseScript() / OnPhaseChange(Int32) / NextPhase()
+```
+
+`NextPhase()` **is** being called — the phase advances shortly after a capture, and
+`OnPhaseChange` tears the old phase's coroutine down. The earlier "the phase never advanced"
+inference came from seeing only one `initial brain sweep`, but that only shows the NEW phase's
+script failed to load; it is not evidence that no phase change occurred. Capture was a correlate,
+not the cause.
+
+### Installing the script for later phases is NOT the fix — it was reverted
+It does not revive anything (the phase change is what kills the old coroutine), and it *introduces*
+the NRE above: runs before that change had zero exceptions of any kind. `er2_deploy` is back to
+`phase_0.lua` only, with `phases` as an opt-in for missions that genuinely want it.
+
+### The fix that works: a watchdog on `soldier_died`
+`soldier_died` is registered on the engine, not on the loop's coroutine, so it keeps firing for the
+whole battle — and it already did an area scan for the kill feed, so bounded work there is proven
+safe on this build. The loop body is now a named `loopBody()` that both the loop and the callback
+can run. When the loop has been silent for `LOOP_STALE` (6 s), the callback drives `loopBody`
+itself, no more often than `PUMP_GAP` (4 s). While the loop is alive the watchdog costs one
+comparison.
+
+**Verified live on Donchery:** loop froze at `trace tick=51 pre-sleep` as always, the watchdog
+logged its one-time takeover line, and objective-attraction output *kept growing* (13 → 16 lines)
+while the tick stayed frozen — with **zero Lua or engine errors**. Objective attraction, the
+bail-out queue drain and the fire-mission consumer all survive the phase change now.

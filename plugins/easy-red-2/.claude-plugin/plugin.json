@@ -1,7 +1,7 @@
 {
   "name": "easy-red-2",
   "description": "See, drive and instrument Easy Red 2 from Claude. Runs the game headless in a gamescope harness (no host window, never touches your cursor), returns screenshots inline, injects clicks/keys, executes Lua in the in-game F3 console for live tuning, tails mod telemetry from Player.log, and syntax-validates + deploys mission/AI-brain scripts.",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "author": {
     "name": "ASAP Australia",
     "url": "https://github.com/ASAP-Australia"

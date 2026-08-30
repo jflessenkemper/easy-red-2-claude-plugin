@@ -4,6 +4,29 @@ All notable changes to the **easy-red-2** Claude Code plugin.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] — 2026-08-30
+
+### Fixed
+- **Reverted the all-phases deploy from 1.3.0; `er2_deploy` installs `phase_0.lua` only again**
+  (`phases` is now opt-in, default 1). Installing the script for later phases revives nothing —
+  the phase change is what kills the old phase's coroutine — and it *introduces* an engine fault:
+  `Lua error at 'phase_1.lua': Object reference not set … BattleManager:TryExecutingPhaseScript()
+  / OnPhaseChange(Int32) / NextPhase()`. Runs before that change had zero exceptions of any kind.
+
+### Documented
+- **`docs/ui-map.md`: corrected the phase-loop write-up and recorded the real cause.** Per-tick
+  tracing shows the last line the loop ever logs is `trace tick=47 pre-sleep` with no matching
+  `post-sleep` — the body completes and **`sleep(1)` never returns**, because ER2 implements sleep
+  as a Unity coroutine and the Lua coroutine is abandoned mid-sleep when `OnPhaseChange` fires.
+  The earlier "dies at objective capture / the phase never advanced" conclusion was wrong: capture
+  is a correlate, and the missing `initial brain sweep` only showed the NEW phase's script failed
+  to load, not that no phase change occurred. **A missing marker is not evidence of a missing
+  event** — worth remembering, it is the second time that shape of mistake has cost a diagnosis
+  here.
+- The mod fixes it internally with a watchdog on `soldier_died` (a callback the engine keeps
+  firing), verified live: attraction output kept growing while the loop's tick stayed frozen, with
+  zero errors.
+
 ## [1.3.0] — 2026-08-30
 
 ### Added
