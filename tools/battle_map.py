@@ -237,10 +237,21 @@ const tok = n => getComputedStyle(document.documentElement).getPropertyValue(n).
 
 // Elevation range across the whole action, so the height ramp is stable while scrubbing rather
 // than rescaling every frame (which would make the same ground change colour as men move).
-let YMIN = 1e9, YMAX = -1e9;
-for (const f of DATA.frames) for (const e of f.s) { const y = e[4]|0;
-  if (y < YMIN) YMIN = y; if (y > YMAX) YMAX = y; }
-if (!(YMAX > YMIN)) { YMIN = 0; YMAX = 1; }
+// PERCENTILE range, not min/max. Aircrew fly at 800+ m, and a ramp stretched to that squashes
+// every man on the ground into one colour - which defeats the point, since the terrain is the
+// thing worth reading. Clamping to the 2nd-98th percentile lets the river flats and the railway
+// embankment separate, and simply saturates the pilots at the top of the ramp.
+let YMIN = 0, YMAX = 1;
+{
+  const ys = [];
+  for (const f of DATA.frames) for (const e of f.s) ys.push(e[4]|0);
+  if (ys.length) {
+    ys.sort((a,b)=>a-b);
+    YMIN = ys[Math.floor(ys.length*0.02)];
+    YMAX = ys[Math.floor(ys.length*0.98)];
+    if (!(YMAX > YMIN)) { YMAX = YMIN + 1; }
+  }
+}
 function heightColour(y){
   const u = Math.max(0, Math.min(1, (y - YMIN) / (YMAX - YMIN)));
   // low ground -> water blue, high ground -> brass. Reads as terrain, not as faction.
