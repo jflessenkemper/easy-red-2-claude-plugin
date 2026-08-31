@@ -74,11 +74,129 @@ def side_of(flag):
     return "inv" if flag in "Ii" else ("def" if flag in "Dd" else "down")
 
 
+
+def headline(sol, veh):
+    """The handful of numbers worth comparing BETWEEN runs, as a dict.
+
+    Deliberately small. The point is not more numbers, it is knowing each one's run-to-run spread
+    before anyone claims a change moved it: two identical-configuration battles produced
+    along/across ratios of 1.19 and 1.39, so a single run showing 1.45 proves nothing.
+    """
+    ts = sorted(sol)
+    out = {}
+    lat, lon, ratio = [], [], []
+    for i in range(1, len(ts)):
+        t0, t1 = ts[i - 1], ts[i]
+        vs = veh.get(t1, [])
+        squads = {}
+        for uid, e in sol[t1].items():
+            x, z, f, sq = e[0], e[1], e[2], e[3]
+            if sq == 0 or side_of(f) != "inv":
+                continue
+            prev = sol[t0].get(uid)
+            if not prev:
+                continue
+            d = math.dist((prev[0], prev[1]), (x, z))
+            if d < 1.0 or d > 40:
+                continue
+            if e[4] == 1 or (e[4] == -1 and vs and min(math.dist((x, z), v) for v in vs) <= 4):
+                continue
+            squads.setdefault(sq, []).append(((x, z), ((x - prev[0]) / d, (z - prev[1]) / d)))
+        for sq, pts in squads.items():
+            if len(pts) < 3:
+                continue
+            hx = st.mean(p[1][0] for p in pts); hz = st.mean(p[1][1] for p in pts)
+            n = math.hypot(hx, hz)
+            if n < 0.3:
+                continue
+            hx, hz = hx / n, hz / n
+            px, pz = -hz, hx
+            a = st.pstdev([p[0][0] * px + p[0][1] * pz for p in pts])
+            b = st.pstdev([p[0][0] * hx + p[0][1] * hz for p in pts])
+            lat.append(a); lon.append(b)
+            if a > 0.01:
+                ratio.append(b / a)
+    out["across_m"] = st.median(lat) if lat else float("nan")
+    out["along_m"] = st.median(lon) if lon else float("nan")
+    out["ratio"] = st.median(ratio) if ratio else float("nan")
+
+    per = defaultdict(list)
+    for i in range(1, len(ts)):
+        gap = ts[i] - ts[i - 1]
+        if gap <= 0 or gap > 20:
+            continue
+        for uid, e in sol[ts[i]].items():
+            dec = e[5]
+            if dec == 0 or e[4] == 1:
+                continue
+            prev = sol[ts[i - 1]].get(uid)
+            if not prev:
+                continue
+            d = math.dist((prev[0], prev[1]), (e[0], e[1]))
+            if d / gap > 25:
+                continue
+            per[dec].append(d / gap)
+    out["roadmarch_mps"] = st.median(per[28]) if len(per.get(28, [])) >= 15 else float("nan")
+    out["advarmour_mps"] = st.median(per[20]) if len(per.get(20, [])) >= 15 else float("nan")
+
+    frozen = tot = 0
+    tr = defaultdict(list)
+    for t in ts:
+        for uid, e in sol[t].items():
+            tr[uid].append((t, e[0], e[1], e[2]))
+    for uid, k in tr.items():
+        if len(k) < 6 or side_of(k[-1][3]) != "inv":
+            continue
+        tot += 1
+        if sum(math.dist(k[j][1:3], k[j + 1][1:3]) for j in range(len(k) - 1)) < 5:
+            frozen += 1
+    out["inv_frozen_pct"] = (100.0 * frozen / tot) if tot else float("nan")
+    return out
+
+
+def compare(paths):
+    """Report each headline metric across several runs, WITH its spread.
+
+    This exists because of a real mistake: a formation change was read as an improvement from one
+    battle, when the metric's own run-to-run spread was larger than the effect. Any claim smaller
+    than the spread shown here is unsupported.
+    """
+    rows = []
+    for pth in paths:
+        sol, veh = load(pth)
+        if not sol:
+            print("  (no telemetry in %s - skipped)" % pth, file=sys.stderr)
+            continue
+        rows.append((os.path.basename(pth), headline(sol, veh)))
+    if len(rows) < 2:
+        print("need at least two logs WITH telemetry to compare", file=sys.stderr)
+        return 1
+    keys = ["ratio", "across_m", "along_m", "roadmarch_mps", "advarmour_mps", "inv_frozen_pct"]
+    print("%-16s" % "metric" + "".join("%12s" % r[0][:11] for r in rows) + "%10s%10s" % ("spread", "verdict"))
+    for k in keys:
+        vals = [r[1].get(k, float("nan")) for r in rows]
+        good = [v for v in vals if v == v]
+        line = "%-16s" % k + "".join(("%12.2f" % v if v == v else "%12s" % "-") for v in vals)
+        if len(good) >= 2:
+            sp = max(good) - min(good)
+            line += "%10.2f" % sp
+            line += "%10s" % ("noisy" if sp > 0.15 * max(1e-9, abs(st.mean(good))) else "stable")
+        print(line)
+    print("\nAny difference smaller than the spread column is NOT evidence of a change.")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("log", nargs="?", default=os.path.expanduser(
-        "~/.config/unity3d/Corvostudio/Easy Red 2/Player.log"))
+    ap.add_argument("log", nargs="*", default=[os.path.expanduser(
+        "~/.config/unity3d/Corvostudio/Easy Red 2/Player.log")])
+    ap.add_argument("--compare", action="store_true",
+                    help="compare headline metrics across several logs, with their spread")
     a = ap.parse_args()
+    logs = a.log if isinstance(a.log, list) else [a.log]
+    if a.compare or len(logs) > 1:
+        return compare(logs)
+    a.log = logs[0]
 
     sol, veh = load(a.log)
     if not sol:

@@ -656,3 +656,38 @@ density or formation statistic, or every result is dominated by vehicle occupant
 
 Caveat kept honest: only 3 frames had enough dismounted invaders far from vehicles for the 32.6 m
 figure, so treat it as indicative rather than settled.
+
+## 2026-09-01 — the movement metrics are NOISY, and I was reading single runs **[V]**
+
+Two battles of the **same** configuration, compared with `movement_audit.py a.log b.log`:
+
+```
+metric            run A       run B     spread   verdict
+ratio              1.45        1.21       0.23    noisy
+across_m           9.02        9.56       0.54   stable
+along_m           15.55       13.07       2.49    noisy
+roadmarch_mps      0.14        0.87       0.73    noisy
+advarmour_mps      0.00        0.32       0.32    noisy
+inv_frozen_pct     0.00        0.00       0.00   stable
+```
+
+**Nothing smaller than the spread column is evidence.** Two conclusions drawn earlier from single
+runs both dissolve against this:
+
+- a formation change that moved the along/across ratio 1.19 -> 1.45 looked like an improvement.
+  The metric's own spread is 0.23. It proved nothing.
+- the same run's `ROAD-MARCH` speed falling 0.30 -> 0.14 looked like a regression. The spread is
+  0.73. That proved nothing either.
+
+**What survives.** `inv_frozen_pct` is 0.00 in both runs with zero spread: no attacker ever freezes.
+That is the metric to trust, and it is the one that matters most.
+
+**And the one earlier conclusion that still stands, for a different reason.** Follow-the-leader was
+rejected because SIX move-decisions sat at exactly 0.00 m/s with it in and every one cleared without
+it. No individual delta there beats the noise - the evidence is the JOINT pattern. Six independent
+metrics pinned to exactly zero simultaneously, then all releasing together, is not something
+run-to-run variance produces.
+
+**Rule going forward:** characterise the variance band before claiming any behavioural change.
+`movement_audit.py <logA> <logB> ...` prints it. A single battle can show a mechanism is broken
+(everything at zero) but cannot show a tuning change helped.
