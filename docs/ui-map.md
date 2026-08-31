@@ -617,3 +617,42 @@ dialog. Neither is visible from here, because Steam's own window is not inside t
   assuming.
 - If the game must be driven and Steam is uncooperative, non-DLC maps still work in direct mode.
   Probes that only need *some* soldiers (API identity, handle stability) do not need Donchery.
+
+## 2026-08-31 — full-entity telemetry, and a spacing figure that was an artifact **[V]**
+
+`getAllVehicles` exists alongside `getAllSoldiers`, so the entire battle can be enumerated rather
+than sampled by radius. `TELEMETRY = true` in the phase script dumps every soldier (position, side,
+suppressed, down) and every vehicle (position, name) every 2 s; `tools/battle_map.py` renders it
+into a scrubbable plot. Measured on Donchery: **93 frames, 865 s, 391 peak entities, 99 vehicles**
+named — including emplaced weapons (`Hotchkiss Ground Tripod`, `Bofors 40mm L/60`) and aircraft
+(12 `Junkers Ju-87 'Stuka' B-2`, 6 `Messerschmitt Bf-109E3`).
+
+**Pack the output.** `log()` costs ~1.1 KB plus a stack walk, so one call per soldier is ~350 calls
+a frame and would distort what it measures. 40 entities per line makes a frame ~12 calls.
+
+### What the movement data says
+| | invaders | defenders |
+|---|---:|---:|
+| centroid net movement | **513 m** | 159 m |
+| median path / net per man | 567 m / 362 m | 122 m / 64 m |
+| never moved (<5 m total) | **0 %** | 11 % |
+
+Invaders advance and *not one* froze across the whole battle. The 11 % of motionless defenders is
+correct: the mod deliberately issues defenders no move orders at all, because measurement proved
+they ignore them.
+
+### The trap — suspect the measurement first
+Nearest-neighbour spacing came out at **1.0 m median** for invaders, which reads as severe
+clumping and would be a real defect. It is not. **Mounted soldiers all report their vehicle's
+position**, so a truckload of nine men looks like nine men standing on one spot. Excluding anyone
+within 4 m of a vehicle:
+
+- invaders, dismounted: **32.6 m** median spacing — well dispersed, no clumping
+- defenders, dismounted: **1.4 m** (p90 6.7 m) — genuinely packed
+
+And the defender figure still is not a mod finding, because the mod never moves defenders: that is
+the scenario's spawn placement plus base AI. Always filter mounted troops out of any spacing,
+density or formation statistic, or every result is dominated by vehicle occupants.
+
+Caveat kept honest: only 3 frames had enough dismounted invaders far from vehicles for the 32.6 m
+figure, so treat it as indicative rather than settled.
