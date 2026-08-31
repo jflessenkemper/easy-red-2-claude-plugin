@@ -50,12 +50,19 @@ def parse(path):
                     uid, x, z = int(parts[0]), int(parts[1]), int(parts[2])
                 except ValueError:
                     continue
-                tag = ",".join(parts[3:])
                 if kind == "S":
-                    fr["s"].append([uid, x, z, tag[:1]])
+                    if len(parts) >= 8:          # uid,x,y,z,flag,squad,inVeh,dec
+                        fr["s"].append([uid, int(parts[1]), int(parts[3]), parts[4][:1],
+                                        int(parts[2]), int(parts[7])])
+                    else:                        # legacy uid,x,z,flag[,squad]
+                        fr["s"].append([uid, x, z, parts[3][:1], 0, 0])
                 else:
-                    vnames[uid] = tag
-                    fr["v"].append([uid, x, z])
+                    if len(parts) >= 5:          # uid,x,y,z,name
+                        vnames[uid] = ",".join(parts[4:])
+                        fr["v"].append([uid, int(parts[1]), int(parts[3])])
+                    else:
+                        vnames[uid] = ",".join(parts[3:])
+                        fr["v"].append([uid, x, z])
     return frames, vnames
 
 
@@ -200,6 +207,9 @@ HTML = """<title>Crossing at Donchery — battle plot</title>
     <span class="clock" id="clock"></span>
     <label class="tog"><input type="checkbox" id="trails"> Movement trails</label>
     <label class="tog"><input type="checkbox" id="gridon" checked> 100 m grid</label>
+    <label class="tog"><input type="radio" name="col" id="colSide" checked> Colour: side</label>
+    <label class="tog"><input type="radio" name="col" id="colHeight"> height</label>
+    <label class="tog"><input type="radio" name="col" id="colDec"> decision</label>
   </div>
 
   <div class="key">
@@ -224,6 +234,28 @@ const trailsBox = document.getElementById('trails'), gridBox = document.getEleme
 slider.max = TS.length - 1;
 
 const tok = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+// Elevation range across the whole action, so the height ramp is stable while scrubbing rather
+// than rescaling every frame (which would make the same ground change colour as men move).
+let YMIN = 1e9, YMAX = -1e9;
+for (const f of DATA.frames) for (const e of f.s) { const y = e[4]|0;
+  if (y < YMIN) YMIN = y; if (y > YMAX) YMAX = y; }
+if (!(YMAX > YMIN)) { YMIN = 0; YMAX = 1; }
+function heightColour(y){
+  const u = Math.max(0, Math.min(1, (y - YMIN) / (YMAX - YMIN)));
+  // low ground -> water blue, high ground -> brass. Reads as terrain, not as faction.
+  const r = Math.round( 40 + u*185), g = Math.round( 90 + u* 72), b = Math.round(130 - u*105);
+  return `rgb(${r},${g},${b})`;
+}
+// Decision families, so the eye groups behaviour rather than reading 31 separate hues.
+const DECCOL = {
+  28:'#5b9dd9', 27:'#5b9dd9', 20:'#7fc4ff', 21:'#7fc4ff', 22:'#7fc4ff',   // moving up
+  23:'#c9a227', 19:'#c9a227', 18:'#c9a227', 24:'#c9a227', 25:'#c9a227', 26:'#c9a227', // holding/firing
+  10:'#c4443a', 3:'#e06c5a', 4:'#e06c5a', 1:'#e06c5a',                    // pinned / broken
+  11:'#5fb87a', 12:'#5fb87a', 13:'#5fb87a', 14:'#5fb87a', 15:'#5fb87a',   // medical
+  5:'#b07cc6', 6:'#b07cc6', 7:'#b07cc6', 8:'#d98cb0', 9:'#d98cb0',        // AT / assault
+  2:'#6e7681', 0:'#4a5058',                                               // mounted / unknown
+};
 
 // World -> canvas, aspect preserved so the ground is never stretched.
 const [x0,x1,z0,z1] = B;
@@ -288,6 +320,8 @@ function draw(i){
     else if (q==='D') col = DEF;
     else if (q==='i'){ col = INV; hollow = true; }
     else if (q==='d'){ col = DEF; hollow = true; }
+    if (document.getElementById('colHeight').checked) col = heightColour(e[4]|0);
+    else if (document.getElementById('colDec').checked) col = DECCOL[e[5]|0] || '#4a5058';
     g.beginPath(); g.arc(x,y,2.8,0,6.2832);
     if (hollow){ g.strokeStyle = col; g.lineWidth = 1.3; g.stroke(); }
     else { g.fillStyle = col; g.fill(); }
@@ -331,6 +365,8 @@ playBtn.addEventListener('click', () => {
 });
 slider.addEventListener('input', () => draw(+slider.value));
 trailsBox.addEventListener('change', () => draw(+slider.value));
+for (const id of ['colSide','colHeight','colDec'])
+  document.getElementById(id).addEventListener('change', () => draw(+slider.value));
 gridBox.addEventListener('change', () => draw(+slider.value));
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => draw(+slider.value));
 new MutationObserver(() => draw(+slider.value))

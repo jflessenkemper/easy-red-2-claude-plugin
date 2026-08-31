@@ -18,6 +18,7 @@ Tools
   er2_log         tail Player.log filtered by tag ([REALISTIC]/[EVENTS]/[BENCH]/errors)
   er2_deploy      luajit-validate + copy mod scripts into a mission's scripts/ tree
   er2_missions    list mission-editor missions and their deployed scripts
+  er2_map         render the battle telemetry into an interactive 3D battle map
 
 No third-party deps: hand-rolled JSON-RPC over stdio, raw AF_UNIX socket, `magick` (optional)
 for downscaling screenshots.
@@ -895,6 +896,30 @@ def t_deploy(args):
     return [text("deploy to %s:\n%s" % (mission, "\n".join(report)))]
 
 
+def t_map(args):
+    """Render the battle telemetry into an interactive 3D map and return the file path.
+
+    Needs TELEMETRY = true in RealisticEvents.lua at the time the battle ran; the mod ships it
+    false, so a shipping build produces no frames and this says so rather than writing an empty
+    page. Not a live view: it renders what has already been logged, which is what makes it
+    replayable and shareable.
+    """
+    out = str(args.get("out") or os.path.join(TMP, "battle_map.html"))
+    log = str(args.get("log") or PLAYER_LOG)
+    tool = os.path.join(PLUGIN_ROOT, "tools", "battle_map.py")
+    if not os.path.exists(tool):
+        return [text("battle_map.py not found at %s" % tool)]
+    r = subprocess.run([sys.executable, tool, log, "-o", out],
+                       capture_output=True, text=True, timeout=300)
+    msg = (r.stdout or "").strip() or (r.stderr or "").strip()
+    if r.returncode != 0:
+        return [text("er2_map FAILED:\n" + msg
+                     + "\n\nIf it reports no [TELEM] lines: set TELEMETRY = true in "
+                       "RealisticEvents.lua, er2_deploy, and run a battle. The mod ships it false.")]
+    return [text(msg + "\n\nOpen that file in a browser. Drag the playhead along the strength "
+                        "curve to reach the fighting; toggle Height to colour by elevation.")]
+
+
 def t_missions(args):
     if not os.path.isdir(MISSION_DIR):
         return [text("no mission_editor dir at %s" % MISSION_DIR)]
@@ -1033,6 +1058,18 @@ TOOLS = {
         "fn": t_missions,
         "description": "List mission-editor missions and which mod scripts are currently deployed in each.",
         "schema": {"type": "object", "properties": {}},
+    },
+    "er2_map": {
+        "fn": t_map,
+        "description": "Render the battle into an interactive map: every soldier and vehicle, "
+                       "positioned in 3D, scrubbable through the whole action, with a strength "
+                       "curve and per-decision colouring. Reads the [TELEM] frames the mod logs "
+                       "when TELEMETRY = true (it ships false, so enable it and redeploy before "
+                       "the battle you want to watch). Answers what a decision count cannot: "
+                       "whether the battle LOOKS right.",
+        "schema": {"type": "object", "properties": {
+            "log": {"type": "string", "description": "Player.log to read (default: the live one)"},
+            "out": {"type": "string", "description": "output .html path"}}},
     },
 }
 

@@ -127,3 +127,39 @@ soldier displacement, because *a decision in the log is not proof of behaviour*.
 
 MIT. Easy Red 2 is a game by Corvostudio; this is an unofficial community tool, not affiliated
 with or endorsed by Corvostudio.
+
+## Watching the battle — `er2_map`
+
+Decision counts tell you a branch fired. They cannot tell you whether the battle *looks* right: a
+label will not show you a section strung out along a road, men bunching behind a halftrack, or one
+soldier left standing in the open after everyone else went to ground.
+
+`er2_map` renders the mod's telemetry into a single self-contained HTML page — every soldier and
+every vehicle, positioned, scrubbable through the whole action:
+
+- **the time slider rides on a strength curve** of both sides, so you jump to where the fighting
+  was instead of hunting blind
+- **colour by side, by height, or by decision** — height reads the terrain (river flats against the
+  railway embankment); decision groups behaviour into families, so advancing, holding, pinned and
+  medical each read at a glance
+- movement trails, a 100 m grid at true scale, and per-frame counts of both sides, suppressed and
+  down
+
+It reads the `[TELEM]` frames the mod logs when `TELEMETRY = true` in `RealisticEvents.lua`. The
+mod **ships that false**, so enable it, `er2_deploy`, and run the battle you want to watch.
+
+Measured on Donchery: ~90 frames over ~13 minutes, 391 entities at peak, 99 vehicles named —
+including emplaced weapons and aircraft.
+
+### `movement_audit.py`
+
+The numeric companion. It answers what the map shows you qualitatively:
+
+- speed, milling, teleports and frozen soldiers, per side
+- **intent versus outcome** — median speed *per decision*, so a move order that produces no
+  movement is caught directly. That failure has happened for real here: defenders were issued
+  `moveTo` orders they silently ignored.
+- formation **per squad**, across versus along the axis of march — the only direct test of whether
+  men actually march in file rather than as a blob
+- nearest-neighbour spacing with **mounted troops excluded**, because men in a vehicle all report
+  the vehicle's position and an unfiltered figure is dominated by them
