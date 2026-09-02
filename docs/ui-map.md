@@ -743,3 +743,38 @@ Three things that were recorded as user-blocked are now agent-doable:
 
 Combined with VirtualScene needing **no DLC**, the whole verification loop can now run in direct
 mode with Steam entirely out of the picture — which is what made it fragile all along.
+
+### The squad-loadout picker, and what the spawn types mean **[V]**
+
+Clicking **Squad loadout** on the spawner panel opens a modal with a **search box** and nation
+filters down the left (`UNARMED USA ENG AUS CAN NZL GKH IND GER HUN ROM JAP ITA RUS FR`), plus
+`CANCEL`. Approximate full-res coords: search `1066,145`, `GER` filter `687,676`, first result
+`1077,216` (row pitch ~46), `CANCEL` `695,1000`.
+
+**Search, do not scroll.** Typing `infantry_1940` narrowed a list of dozens to exactly one hit,
+`GER_INFANTRY_1940`. Use `er2_type` after clicking the search box.
+
+**Greyed-out entries are DLC-locked**, and several carry `ARDENNES` / `NORMANDY` badges. In direct
+mode (no entitlement) they cannot be selected — pick an unbadged one, which is how
+`ger_infantry_1940` was chosen.
+
+**Spawn type is the respawn control.** The dropdown values seen so far:
+- `AI once, Player non-stop` — **the AI squad spawns ONCE and never respawns.** This is what
+  "everyone spawns at the start, no AI respawns" actually needs; `Respawn delay` is a separate
+  slider and was already 0.
+- `Player / AI (non-stop)` — the default on a newly placed spawner, and it does respawn.
+
+**`AI Brain (Script)` was already `Realistic.lua`** on the German spawner, with an `Edit` row
+(pencil) appearing beneath it once set. So a mission can drive the mod through the Brain field as
+well as through the phase script's auto-attach.
+
+**Saving works and can be verified off-screen:** Σ `49,1044` → save icon `380,1044` → `Save`
+`300,108`, then check the `.mer2` mtime and grep it for the new loadout token. Confirmed: the file
+was rewritten and now contains `ger_infantry_1940`.
+
+### Why VirtualScene was useless as a test rig
+
+Its `Testing` mission had exactly two AI spawners, and their loadouts were **`German Bayonet`** and
+**`English bayonet`** — bayonet-only squads with no MG, no AT and no rifles. That is the real
+explanation for the 6 v 6 mutual-`PINNED` melee stalemate measured there earlier, which had been
+put down to the flat terrain. A test rig has to have its loadouts checked before its geometry.
