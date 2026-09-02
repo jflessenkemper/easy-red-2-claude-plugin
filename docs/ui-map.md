@@ -691,3 +691,55 @@ run-to-run variance produces.
 **Rule going forward:** characterise the variance band before claiming any behavioural change.
 `movement_audit.py <logA> <logB> ...` prints it. A single battle can show a mechanism is broken
 (everything at zero) but cannot show a tuning change helped.
+
+## 2026-09-01 — THE UNIT SPAWNER PANEL IS REACHABLE **[V, high value]**
+
+This overturns the earlier conclusion that the editor is undriveable. That conclusion was about
+**selecting existing** objects by clicking them in the world, which still does not work. **Placing**
+a new object does, and once placed its **full settings panel opens** — and the panel has arrows that
+cycle through every other spawner, so existing ones are reachable without ever clicking the world.
+
+**The sequence that works** (VirtualScene, direct mode, no DLC, no Steam):
+
+1. `er2_launch {"via_steam": false}` → space past splash
+2. `er2_click 204,820` main menu Mission Editor → `1392,403` hub Mission Editor
+3. mission list row `1544,y` (row1 y=79, pitch 52) — **single click, `reliable:false`**, rows toggle
+4. sub-row at `y+52` → mission dialog → **Edit mission `960,371`** → wait ~75 s for the map
+5. **add-spawner tool `1604,1033`** (2nd of the five bottom-right icons). The spawner is placed at
+   the camera aim point — no world picking involved — and the HUD switches to transform mode
+   (`Quick Transform` / `Shift` elevate / `Z` drag / `0` reset).
+6. **click the spawner's base at screen centre `952,533`** → the **Unit spawner** panel opens.
+
+**Do NOT press Escape to leave transform mode** — it opens the game's pause menu, not the panel.
+
+### What the panel exposes
+
+| Control | Approx. full-res coords | Notes |
+|---|---|---|
+| prev / next spawner | `853,207` / `1216,207` | **cycles ALL spawners** — how to reach existing ones |
+| faction (e.g. `United States (allies)`) | `950,262` | |
+| **Spawn type** | `1035,314` | dropdown, e.g. `Player / AI (non-stop)` |
+| **Squad loadout** | `1035,365` | e.g. `usa_INFANTRY` — the squad type token |
+| Size X / Size Y | `1035,418` / `1035,470` | spawn radius sliders |
+| Spawn on vehicle | `1035,525` | yes/no toggle |
+| Waypoint | `1035,576` | e.g. `Free movements` |
+| **Respawn delay** | `1035,627` | **this is the no-respawns setting** |
+| **AI Brain (Script)** | `1035,704` | dropdown — the per-spawner Brain field |
+| Persistent | `1226,755` | checkbox |
+| Copy object / Move / Delete | `1233,835` / `960,883` / `960,937` | |
+| close | `1233,141` | |
+
+Coordinates are derived from a 900-px capture scaled to 1920 and should be confirmed with a
+screenshot on first use rather than trusted blind.
+
+### Why this matters
+
+Three things that were recorded as user-blocked are now agent-doable:
+
+- **the T1–T13 test scenarios** — forces, squad types, spacing and respawn are all settable here
+- **"no AI respawns, everyone at the start"** — `Respawn delay` plus `Spawn type`
+- **the Donchery historical rebuild** — squad loadouts and counts, without touching the
+  BinaryFormatter `.mer2` by hand
+
+Combined with VirtualScene needing **no DLC**, the whole verification loop can now run in direct
+mode with Steam entirely out of the picture — which is what made it fragile all along.
