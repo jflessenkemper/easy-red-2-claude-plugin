@@ -129,6 +129,116 @@ MIN_SOLDIERS = 3         # contributing soldiers a label needs before the gate m
 EXPECTED_LABELS = sorted(MOVE_ORDERS | HOLD_ORDERS | COVER_ORDERS | EXEMPT_ORDERS | OBJECTIVE_ORDERS)
 
 
+# --------------------------------------------------------------------------------------------
+# SEMANTIC [EVENTS] PARSING
+#
+# The phase script is where three scenarios are judged, and its numbers were being thrown away:
+# the shape counter normalises every digit to N, so "bail-out: 2 crew left vehicle Panzer II" and
+# "bail-out: 0 crew ..." collapse into one indistinguishable bucket. These patterns keep the
+# values. Formats taken verbatim from RealisticEvents.lua, not guessed:
+#   :816   logonly("bail-out: " .. out .. " crew left vehicle " .. vname .. " (reason, via method)")
+#   :904   "RADIO-fire-mission REFUSED danger close: friendly of side %d within %dm of %d,%d (%s)"
+#   :910   "RADIO-fire-mission accepted: side=%d target=%d,%d rounds in %ds (%s)"
+#   :993   "RADIO-fire-mission rounds away: %d shells on %d,%d for side %d"
+#   :1269  "obj%d inv=%d def=%d held=%s invAttract=%s%s"   (+ "  <- CAPTURED by attackers")
+#   :1103  "watch: alive=%d moving=%d still=%d stuck=%d(>%ds) inv=%d def=%d"
+EV_BAIL = re.compile(r"bail-out:\s+(\d+)\s+crew left vehicle\s+(.*?)\s+\(([^,]+),")
+EV_FIRE_REFUSED = re.compile(r"RADIO-fire-mission REFUSED\s+([a-z ]+?)(?:[,:]|\s*\()")
+EV_FIRE_OK = re.compile(r"RADIO-fire-mission accepted: side=(-?\d+) target=(-?\d+),(-?\d+)")
+EV_ROUNDS = re.compile(r"RADIO-fire-mission rounds away:\s+(\d+)\s+shells on\s+(-?\d+),(-?\d+)")
+EV_OBJ = re.compile(r"obj(\d+)\s+inv=(\d+)\s+def=(\d+)\s+held=(\w+)\s+invAttract=(\w+)(.*)")
+EV_WATCH = re.compile(r"watch:\s+alive=(\d+)\s+moving=(\d+)\s+still=(\d+)\s+stuck=(\d+)")
+EV_WATCHDOG = re.compile(r"WATCHDOG: the phase loop stopped")
+
+
+def new_semantics():
+    return {"bail": [], "fire_refused": collections.Counter(), "fire_accepted": [],
+            "rounds": [], "obj": {}, "captures": [], "watch": [], "watchdog": 0}
+
+
+def parse_event(body, sem):
+    """Pull the VALUES out of a phase-script event line. Mutates `sem`."""
+    m = EV_BAIL.search(body)
+    if m:
+        sem["bail"].append((int(m.group(1)), m.group(2), m.group(3)))
+        return
+    m = EV_FIRE_REFUSED.search(body)
+    if m:
+        sem["fire_refused"][m.group(1).strip()] += 1
+        return
+    m = EV_FIRE_OK.search(body)
+    if m:
+        sem["fire_accepted"].append((int(m.group(1)), int(m.group(2)), int(m.group(3))))
+        return
+    m = EV_ROUNDS.search(body)
+    if m:
+        sem["rounds"].append((int(m.group(1)), int(m.group(2)), int(m.group(3))))
+        return
+    m = EV_OBJ.search(body)
+    if m:
+        i = int(m.group(1))
+        sem["obj"][i] = {"inv": int(m.group(2)), "def": int(m.group(3)),
+                         "held": m.group(4) == "true", "attract": m.group(5) == "true"}
+        if "CAPTURED" in m.group(6):
+            sem["captures"].append(i)
+        return
+    m = EV_WATCH.search(body)
+    if m:
+        sem["watch"].append(tuple(int(m.group(i)) for i in (1, 2, 3, 4)))
+        return
+    if EV_WATCHDOG.search(body):
+        sem["watchdog"] += 1
+
+
+def report_semantics(sem):
+    """Print what the phase script actually did. This is T9/T10/T12's evidence."""
+    print("\nPHASE-SIDE EVENTS (the numbers, not the shapes)")
+    if sem["bail"]:
+        tot = sum(b[0] for b in sem["bail"])
+        vehicles = collections.Counter(b[1] for b in sem["bail"])
+        reasons = collections.Counter(b[2] for b in sem["bail"])
+        print("  crew bail-out : %d events, %d men left vehicles" % (len(sem["bail"]), tot))
+        print("                  vehicles: %s" % dict(vehicles))
+        print("                  reasons : %s" % dict(reasons))
+        if tot == 0:
+            print("                  *** every event freed ZERO men - the branch fired but did nothing")
+    else:
+        print("  crew bail-out : no events (T9 needs a knocked-out CREWED vehicle, not a truck)")
+
+    nref = sum(sem["fire_refused"].values())
+    if sem["fire_accepted"] or nref:
+        print("  fire missions : %d accepted, %d refused" % (len(sem["fire_accepted"]), nref))
+        for why, n in sem["fire_refused"].most_common():
+            print("                  refused x%-3d %s" % (n, why))
+        if sem["rounds"]:
+            print("                  ROUNDS AWAY: %s"
+                  % ", ".join("%d shells on %d,%d" % r for r in sem["rounds"][:4]))
+        elif sem["fire_accepted"]:
+            print("                  *** accepted but NO rounds away - the barrage never fired")
+        else:
+            print("                  no barrage has landed; 'REFUSED danger close' is the fail-safe")
+            print("                  working, not a fault. T10 puts the enemy at 130 m to clear it.")
+    else:
+        print("  fire missions : no requests reached the phase script")
+
+    if sem["obj"]:
+        print("  objectives    : %d managed; captured %s"
+              % (len(sem["obj"]), sem["captures"] or "none"))
+        for i in sorted(sem["obj"]):
+            o = sem["obj"][i]
+            print("                  obj%d inv=%d def=%d held=%s attract=%s"
+                  % (i, o["inv"], o["def"], o["held"], o["attract"]))
+    if sem["watch"]:
+        last = sem["watch"][-1]
+        stuck = [w[3] for w in sem["watch"]]
+        print("  watch         : %d sweeps; last alive=%d moving=%d still=%d stuck=%d; peak stuck %d"
+              % (len(sem["watch"]), last[0], last[1], last[2], last[3], max(stuck)))
+    if sem["watchdog"]:
+        print("  watchdog      : fired %d time(s) - the phase loop died and was pumped by"
+              " soldier_died. Cadence is casualty-driven (~7 s) from then on, which degrades"
+              " every delta-t metric." % sem["watchdog"])
+
+
 def load(path: str, from_line: int):
     tracks: dict[str, list[dict]] = collections.defaultdict(list)
     labels = collections.Counter()
@@ -136,6 +246,7 @@ def load(path: str, from_line: int):
     online = set()
     offline = set()
     events = collections.Counter()
+    sem = new_semantics()
     total = 0
     with open(path, errors="replace") as fh:
         for n, line in enumerate(fh, 1):
@@ -145,7 +256,12 @@ def load(path: str, from_line: int):
             if "[EVENTS]" in line:
                 m = re.search(r"\[EVENTS\]\s+(.*)", line)
                 if m:
-                    events[re.sub(r"-?\d+(\.\d+)?", "N", m.group(1).strip())[:110]] += 1
+                    body = m.group(1).strip()
+                    # Shape counting keeps the overview, but it replaces every digit with N and so
+                    # DESTROYS the numbers -- and T9, T10 and T12 are all judged phase-side, on
+                    # exactly those numbers. So parse the four semantic families FIRST, then shape.
+                    events[re.sub(r"-?\d+(\.\d+)?", "N", body)[:110]] += 1
+                    parse_event(body, sem)
             if ERRORS.search(line):
                 key = "guard(once)" if "guard(once)" in line else \
                       "callback error" if "Error in callback" in line else \
@@ -168,7 +284,7 @@ def load(path: str, from_line: int):
                 "t": float(d["t"]) if d.get("t") else None,
                 "objd": int(d["objd"]) if d["objd"] else None,
             })
-    return tracks, labels, errors, online, offline, events, total
+    return tracks, labels, errors, online, offline, events, total, sem
 
 
 def displacement(pts):
@@ -247,7 +363,7 @@ def main() -> int:
         print("no log at %s" % a.log)
         return 2
 
-    tracks, labels, errors, online, offline, events, total = load(a.log, a.from_line)
+    tracks, labels, errors, online, offline, events, total, sem = load(a.log, a.from_line)
 
     rows = []
     for uid, pts in tracks.items():
@@ -422,6 +538,8 @@ def main() -> int:
         print("\nLABELS NEVER SEEN (unreachable branch, or scenario-dependent):")
         for l in missing:
             print("  - %s" % l)
+
+    report_semantics(sem)
 
     print("\nTOP [EVENTS] SHAPES")
     for shape, n in events.most_common(12):
