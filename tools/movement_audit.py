@@ -74,6 +74,86 @@ def side_of(flag):
     return "inv" if flag in "Ii" else ("def" if flag in "Dd" else "down")
 
 
+# The DEC code -> label map, mirroring Realistic.lua's DEC.code table (the authority). Code 7
+# (AT-hold-cover) was retired 2026-09-08 and the number is deliberately left as a gap so no
+# parser needs renumbering. Cross-checked by er2-realistic/tests/dec_map_check.py.
+DEC_NAMES = {
+    1: "CREW-onfoot", 2: "MOUNTED/CREW-defer", 3: "ROUT", 4: "ROUT-cover",
+    5: "AT-stalk", 6: "AT-hunt", 8: "ASSAULT", 9: "ASSAULT-cover",
+    10: "PINNED", 11: "MEDIC-sortie", 12: "MEDIC-hold-cover",
+    13: "DRAG-approach", 14: "DRAG-pickup", 15: "DRAG-to-cover", 16: "DRAG-abandon",
+    17: "RADIO-fire-mission", 18: "LEADER-cover", 19: "SUPPORT-hold-fire",
+    20: "ADVANCE-behind-armour", 21: "BOUND-move", 22: "BOUND-move-cover",
+    23: "BOUND-overwatch", 24: "FIGHT-from-cover", 25: "DEFEND-hold",
+    26: "CONSOLIDATE", 27: "RALLY-on-MG", 28: "ROAD-MARCH", 29: "ADVANCE-baseAI",
+    30: "RETURN-to-transport", 31: "REBOARD-transport",
+}
+
+
+
+def formation(sol, veh, dec=None):
+    """Per-squad anisotropy: sigma ACROSS the line of travel vs sigma ALONG it, and the ratio.
+
+    `dec` filters to a single decision code, which is the whole point of factoring this out.
+    The pooled (dec=None) version cannot test a squad-level feature: RALLY-on-MG is 5.48% of
+    soldier samples (1142/20842 in base2), so a formation change there is diluted roughly 18:1 in
+    the pooled figure -- far below the metric's own 0.20-0.23 run-to-run spread. The one analysis
+    that ever produced real Kette evidence was this, computed by hand and never committed.
+
+    Returns (across_m, along_m, ratio, squad_frames, samples). `squad_frames` is the number of
+    (frame, squad) groups that cleared the >=3-mover filter and `samples` the total men in them --
+    both reported because a ratio over 4 squad-frames is not the same claim as one over 89, and
+    the population itself is wildly unstable: two identical-configuration runs produced 0 and 89.
+
+    Anisotropy, not interval, deliberately. Every doctrinal interval is sub-sigma against the
+    engine's ~13 m pathing scatter (Schuetzenkette 4-5 m is 0.31-0.38 sigma), so a file and a line
+    are indistinguishable by construction unless you measure axis and extent.
+    """
+    ts = sorted(sol)
+    lat, lon, ratio = [], [], []
+    frames = samples = 0
+    for i in range(1, len(ts)):
+        t0, t1 = ts[i - 1], ts[i]
+        vs = veh.get(t1, [])
+        squads = {}
+        for uid, e in sol[t1].items():
+            x, z, f, sq = e[0], e[1], e[2], e[3]
+            if sq == 0 or side_of(f) != "inv":
+                continue
+            if dec is not None and e[5] != dec:
+                continue
+            prev = sol[t0].get(uid)
+            if not prev:
+                continue
+            d = math.dist((prev[0], prev[1]), (x, z))
+            if d < 1.0 or d > 40:
+                continue
+            # Mounted men all report the VEHICLE's position, so a truckload reads as nine men on
+            # one spot. This faked a 1.0 m median spacing that was really 32 m.
+            if e[4] == 1 or (e[4] == -1 and vs and min(math.dist((x, z), v) for v in vs) <= 4):
+                continue
+            squads.setdefault(sq, []).append(((x, z), ((x - prev[0]) / d, (z - prev[1]) / d)))
+        for sq, pts in squads.items():
+            if len(pts) < 3:
+                continue
+            hx = st.mean(p[1][0] for p in pts); hz = st.mean(p[1][1] for p in pts)
+            n = math.hypot(hx, hz)
+            if n < 0.3:          # no coherent direction of travel: no axis to measure against
+                continue
+            hx, hz = hx / n, hz / n
+            px, pz = -hz, hx
+            a = st.pstdev([p[0][0] * px + p[0][1] * pz for p in pts])
+            b = st.pstdev([p[0][0] * hx + p[0][1] * hz for p in pts])
+            lat.append(a); lon.append(b)
+            frames += 1
+            samples += len(pts)
+            if a > 0.01:
+                ratio.append(b / a)
+    return (st.median(lat) if lat else float("nan"),
+            st.median(lon) if lon else float("nan"),
+            st.median(ratio) if ratio else float("nan"),
+            frames, samples)
+
 
 def headline(sol, veh):
     """The handful of numbers worth comparing BETWEEN runs, as a dict.
@@ -84,41 +164,8 @@ def headline(sol, veh):
     """
     ts = sorted(sol)
     out = {}
-    lat, lon, ratio = [], [], []
-    for i in range(1, len(ts)):
-        t0, t1 = ts[i - 1], ts[i]
-        vs = veh.get(t1, [])
-        squads = {}
-        for uid, e in sol[t1].items():
-            x, z, f, sq = e[0], e[1], e[2], e[3]
-            if sq == 0 or side_of(f) != "inv":
-                continue
-            prev = sol[t0].get(uid)
-            if not prev:
-                continue
-            d = math.dist((prev[0], prev[1]), (x, z))
-            if d < 1.0 or d > 40:
-                continue
-            if e[4] == 1 or (e[4] == -1 and vs and min(math.dist((x, z), v) for v in vs) <= 4):
-                continue
-            squads.setdefault(sq, []).append(((x, z), ((x - prev[0]) / d, (z - prev[1]) / d)))
-        for sq, pts in squads.items():
-            if len(pts) < 3:
-                continue
-            hx = st.mean(p[1][0] for p in pts); hz = st.mean(p[1][1] for p in pts)
-            n = math.hypot(hx, hz)
-            if n < 0.3:
-                continue
-            hx, hz = hx / n, hz / n
-            px, pz = -hz, hx
-            a = st.pstdev([p[0][0] * px + p[0][1] * pz for p in pts])
-            b = st.pstdev([p[0][0] * hx + p[0][1] * hz for p in pts])
-            lat.append(a); lon.append(b)
-            if a > 0.01:
-                ratio.append(b / a)
-    out["across_m"] = st.median(lat) if lat else float("nan")
-    out["along_m"] = st.median(lon) if lon else float("nan")
-    out["ratio"] = st.median(ratio) if ratio else float("nan")
+    a, b, r, _, _ = formation(sol, veh)
+    out["across_m"], out["along_m"], out["ratio"] = a, b, r
 
     per = defaultdict(list)
     for i in range(1, len(ts)):
@@ -154,12 +201,25 @@ def headline(sol, veh):
     return out
 
 
-def compare(paths):
-    """Report each headline metric across several runs, WITH its spread.
+# Known run-to-run spread of the formation ratio, from two pairs of identical-configuration
+# battles: 1.19 vs 1.39 (0.20) and a separately recorded 0.23. Use the WIDER figure -- an effect
+# has to clear the worst observed noise, not the kindest.
+RATIO_SPREAD = 0.23
+ROADMARCH_SPREAD = 0.73
+MIN_RUNS = 3
+
+
+def compare(paths, claim=None, strict=True):
+    """Report each headline metric across several runs, WITH its spread, and REFUSE weak claims.
 
     This exists because of a real mistake: a formation change was read as an improvement from one
-    battle, when the metric's own run-to-run spread was larger than the effect. Any claim smaller
-    than the spread shown here is unsupported.
+    battle, when the metric's own run-to-run spread was larger than the effect. It used to print
+    an advisory sentence and exit 0, which is exactly the failure mode it was written to prevent --
+    nothing mechanically stopped the claim. Now it exits non-zero.
+
+    Two refusals:
+      * fewer than MIN_RUNS runs of a configuration -- two points cannot establish a band
+      * a claimed delta (--claim METRIC=DELTA) no larger than the measured spread
     """
     rows = []
     for pth in paths:
@@ -172,18 +232,57 @@ def compare(paths):
         print("need at least two logs WITH telemetry to compare", file=sys.stderr)
         return 1
     keys = ["ratio", "across_m", "along_m", "roadmarch_mps", "advarmour_mps", "inv_frozen_pct"]
-    print("%-16s" % "metric" + "".join("%12s" % r[0][:11] for r in rows) + "%10s%10s" % ("spread", "verdict"))
+    print("%-16s" % "metric" + "".join("%12s" % r[0][:11] for r in rows)
+          + "%8s%10s%10s" % ("n", "spread", "verdict"))
+    spreads = {}
     for k in keys:
         vals = [r[1].get(k, float("nan")) for r in rows]
         good = [v for v in vals if v == v]
         line = "%-16s" % k + "".join(("%12.2f" % v if v == v else "%12s" % "-") for v in vals)
+        line += "%8d" % len(good)
         if len(good) >= 2:
             sp = max(good) - min(good)
+            spreads[k] = sp
             line += "%10.2f" % sp
             line += "%10s" % ("noisy" if sp > 0.15 * max(1e-9, abs(st.mean(good))) else "stable")
+        else:
+            line += "%10s%10s" % ("-", "no band")
         print(line)
+
+    rc = 0
     print("\nAny difference smaller than the spread column is NOT evidence of a change.")
-    return 0
+    if len(rows) < MIN_RUNS:
+        print("REFUSED: %d run(s) of this configuration; %d are needed to establish a band. "
+              "Two points are a line, not a distribution." % (len(rows), MIN_RUNS))
+        if strict:
+            rc = 2
+
+    if claim:
+        try:
+            metric, delta = claim.split("=", 1)
+            delta = abs(float(delta))
+        except ValueError:
+            print("bad --claim (want METRIC=DELTA, e.g. ratio=0.31)", file=sys.stderr)
+            return 1
+        # Prefer this run's own measured spread; fall back to the recorded historical figure, so a
+        # claim can still be judged against something when only one configuration was supplied.
+        band = spreads.get(metric)
+        src = "measured here"
+        if band is None or len(rows) < MIN_RUNS:
+            band = {"ratio": RATIO_SPREAD, "roadmarch_mps": ROADMARCH_SPREAD}.get(metric)
+            src = "recorded historical spread"
+        if band is None:
+            print("REFUSED: no spread available for '%s' - run %d configurations of it first"
+                  % (metric, MIN_RUNS))
+            return 2 if strict else 0
+        if delta > band:
+            print("SUPPORTED: claimed %s delta %.3f EXCEEDS the %s %.3f" % (metric, delta, src, band))
+        else:
+            print("REFUSED: claimed %s delta %.3f is INSIDE the %s %.3f - not evidence"
+                  % (metric, delta, src, band))
+            if strict:
+                rc = 2
+    return rc
 
 
 def main():
@@ -192,10 +291,14 @@ def main():
         "~/.config/unity3d/Corvostudio/Easy Red 2/Player.log")])
     ap.add_argument("--compare", action="store_true",
                     help="compare headline metrics across several logs, with their spread")
+    ap.add_argument("--claim", metavar="METRIC=DELTA",
+                    help="assert a change of DELTA in METRIC; exits 2 if it is inside the spread")
+    ap.add_argument("--no-strict", action="store_true",
+                    help="report refusals but still exit 0")
     a = ap.parse_args()
     logs = a.log if isinstance(a.log, list) else [a.log]
-    if a.compare or len(logs) > 1:
-        return compare(logs)
+    if a.compare or len(logs) > 1 or a.claim:
+        return compare(logs, claim=a.claim, strict=not a.no_strict)
     a.log = logs[0]
 
     sol, veh = load(a.log)
@@ -346,54 +449,41 @@ def main():
     else:
         print("\n--- INTENT vs OUTCOME: no decision codes in this log (older telemetry format)")
 
-    # ---- 5b : formation PER SQUAD - the only direct test of the staggered file
+    # ---- 5b : formation PER SQUAD - the only direct test of a formation change
     # A section in file spreads ALONG its axis of march and stays narrow ACROSS it. A blob spreads
     # equally both ways. Measuring the whole force instead just reports army frontage, which swamps
     # the few metres that separate two files of one section.
+    #
+    # Both the pooled figure AND a per-decision breakdown are printed, because the pooled one
+    # CANNOT test a squad-level feature: RALLY-on-MG is ~5% of soldier samples, so a change there
+    # is diluted ~18:1 - far under the metric's own 0.20-0.23 run-to-run spread. Read the row for
+    # the branch you actually changed, and read its n before believing its ratio.
     print("\n--- formation PER SQUAD (dismounted, moving, >=3 men in the squad)")
-    lat, lon, ratio = [], [], []
-    for i in range(1, len(ts)):
-        t0, t1 = ts[i - 1], ts[i]
-        vs = veh.get(t1, [])
-        squads = {}
-        for uid, e in sol[t1].items():
-            x, z, f, sq = e[0], e[1], e[2], (e[3] if len(e) > 3 else 0)
-            if sq == 0 or side_of(f) != "inv":
-                continue
-            prev = sol[t0].get(uid)
-            if not prev:
-                continue
-            d = math.dist((prev[0], prev[1]), (x, z))
-            if d < 1.0 or d > 40:
-                continue
-            if e[4] == 1 or (e[4] == -1 and vs and min(math.dist((x, z), v) for v in vs) <= 4):
-                continue
-            squads.setdefault(sq, []).append(((x, z), ((x - prev[0]) / d, (z - prev[1]) / d)))
-        for sq, pts in squads.items():
-            if len(pts) < 3:
-                continue
-            hx = st.mean(p[1][0] for p in pts); hz = st.mean(p[1][1] for p in pts)
-            n = math.hypot(hx, hz)
-            if n < 0.3:
-                continue
-            hx, hz = hx / n, hz / n
-            px, pz = -hz, hx
-            across = [p[0][0] * px + p[0][1] * pz for p in pts]
-            along  = [p[0][0] * hx + p[0][1] * hz for p in pts]
-            a = st.pstdev(across) if len(across) > 1 else 0
-            b = st.pstdev(along) if len(along) > 1 else 0
-            lat.append(a); lon.append(b)
-            if a > 0.01:
-                ratio.append(b / a)
-    if lat:
-        print(f"   squad-frames measured {len(lat)}")
-        print(f"   ACROSS the axis (should be small): median {st.median(lat):5.1f} m")
-        print(f"   ALONG  the axis (should be larger): median {st.median(lon):5.1f} m")
-        if ratio:
-            print(f"   along/across ratio: median {st.median(ratio):.2f}"
+    a, b, r, frames, samples = formation(sol, veh)
+    if frames:
+        print(f"   squad-frames measured {frames}  (men sampled {samples})")
+        print(f"   ACROSS the axis (should be small): median {a:5.1f} m")
+        print(f"   ALONG  the axis (should be larger): median {b:5.1f} m")
+        if r == r:
+            print(f"   along/across ratio: median {r:.2f}"
                   f"   ( >1 = strung out in file, ~1 = a blob )")
     else:
         print("   no squad had 3+ dismounted movers in a frame - cannot measure")
+
+    print("\n--- formation BY DECISION (isolates the branch; n matters more than the ratio)")
+    hdr = False
+    for dec in sorted(DEC_NAMES):
+        da, db, dr, df, dsm = formation(sol, veh, dec)
+        if df == 0:
+            continue
+        if not hdr:
+            print("   %-24s %7s %7s %7s %8s %8s"
+                  % ("decision", "across", "along", "ratio", "frames", "men"))
+            hdr = True
+        print("   %-24s %7.1f %7.1f %7s %8d %8d"
+              % (DEC_NAMES[dec], da, db, ("%.2f" % dr) if dr == dr else "-", df, dsm))
+    if not hdr:
+        print("   no decision code had a measurable squad-frame")
 
     # ---- 6 : spacing, mounted excluded
     print("\n--- spacing: nearest neighbour, mounted troops EXCLUDED")
