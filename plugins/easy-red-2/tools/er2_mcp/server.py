@@ -376,7 +376,8 @@ def t_launch(args):
                     st = parse_state(hsend(["STATE"])[0])
                     if st.get("ready") == "1" and st.get("inner_alive") == "1":
                         msg = ("launched via Steam (DLC entitlements available). STATE=%s"
-                               % json.dumps(st))
+                               % json.dumps(st)
+                               + "\naudio: " + _isolate_audio())
                         return [text(_with_workshop_warning(msg))]
                 except HarnessError:
                     pass
@@ -432,6 +433,8 @@ def t_launch(args):
                 st = parse_state(hsend(["STATE"])[0])
                 last = json.dumps(st)
                 if st.get("ready") == "1" and st.get("inner_alive") == "1":
+                    if args.get("mute", True):
+                        last += " audio=" + _isolate_audio()
                     msg = ("launched harness pid=%s; game ready. STATE=%s" % (p.pid, last)
                            + "\nNOTE: direct mode gets NO DLC entitlement - DLC maps show a dead "
                              "\"Needs DLCs: <name>\" sub-row in the mission list and will not open.")
@@ -440,6 +443,47 @@ def t_launch(args):
                 last = str(e)
         time.sleep(2)
     return [text("launch timed out after waiting. last=%s (see %s/harness.log)" % (last, TMP))]
+
+
+def _isolate_audio():
+    """Move the game's live FMOD stream onto the null sink.
+
+    PULSE_SINK IS NOT SUFFICIENT ON ITS OWN, measured 2026-09-08: the env var is honoured only at
+    stream-creation time, and module-stream-restore then RE-ROUTES the new stream back to whatever
+    sink that application name last used - which is the real output. Observed directly: the null
+    sink existed at index 1251 and PULSE_SINK was set, yet the game's "FMOD Ex App" sink-input came
+    up on sink 695, i.e. audible. So the stream must be moved AFTER it appears.
+
+    Moves ONLY the game's own sink-input. It must never mute @DEFAULT_SINK@ and never loop over
+    every sink-input: doing that once muted the user's other game AND a live voice call.
+    """
+    sink = os.environ.get("ER2_NULL_SINK", "er2_silence")
+    try:
+        short = subprocess.run(["pactl", "list", "short", "sinks"],
+                               capture_output=True, text=True, timeout=10).stdout
+        idx_null = None
+        for line in short.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] == sink:
+                idx_null = parts[0]
+        if not idx_null:
+            return "no null sink '%s'; game audio NOT isolated" % sink
+
+        detail = subprocess.run(["pactl", "list", "sink-inputs"],
+                                capture_output=True, text=True, timeout=10).stdout
+        cur, moved = None, []
+        for line in detail.splitlines():
+            line = line.strip()
+            if line.startswith("Sink Input #"):
+                cur = line.split("#", 1)[1].strip()
+            elif 'application.name = "FMOD' in line and cur:
+                subprocess.run(["pactl", "move-sink-input", cur, idx_null],
+                               capture_output=True, text=True, timeout=10)
+                moved.append(cur)
+        return ("moved sink-input(s) %s -> %s" % (",".join(moved), sink)
+                if moved else "no FMOD sink-input found yet")
+    except Exception as e:
+        return "audio isolation failed: %s" % e
 
 
 def t_stop(args):
