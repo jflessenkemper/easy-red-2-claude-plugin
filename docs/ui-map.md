@@ -778,3 +778,23 @@ Its `Testing` mission had exactly two AI spawners, and their loadouts were **`Ge
 **`English bayonet`** — bayonet-only squads with no MG, no AT and no rifles. That is the real
 explanation for the 6 v 6 mutual-`PINNED` melee stalemate measured there earlier, which had been
 put down to the flat terrain. A test rig has to have its loadouts checked before its geometry.
+
+## 2026-09-08 — v2.1.0 NAVIGATION HAZARDS (measured, cost a relaunch) **[V]**
+
+The editor hub changed layout in 2.1.0 and the old coordinates are stale. Working route at
+1920x1080 internal: MISSION EDITOR panel `1490,417` -> mission row `1554,78` (rows are TOGGLES,
+always `{"reliable": false}`) -> VIRTUALSCENE `1554,182` -> its sub-row `1554,242` -> Edit Mission
+`960,371` (the properties dialog has NO Play) -> Sigma `49,1044` -> Save/Play `380,1044` -> Play
+`300,184`.
+
+**"Exit" in the in-battle pause menu (`1824,1007`) goes to the MAIN MENU, not the editor.** The
+old note assumed the editor. Following it with the editor's Sigma coordinates therefore clicks
+blind on main-menu items - it landed on CREDITS once.
+
+**Escape on the CREDITS screen QUITS THE GAME.** Observed: `inner_alive=0`, requiring a relaunch.
+BACK at the bottom-left scrolls the credits rather than leaving, so there is no safe synthetic exit
+from that screen - do not navigate into it.
+
+**To reload a phase script, do the FULL route from the main menu.** A phase script is read at
+battle start, so it must be re-entered; but exiting a battle lands on the main menu, so the
+editor-relative shortcut does not apply.

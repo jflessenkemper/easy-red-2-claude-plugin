@@ -179,7 +179,7 @@ def approach(sol, dec, side="inv", radius=SENSE_RADIUS):
     """
     ts = sorted(sol)
     other = "def" if side == "inv" else "inv"
-    deltas = []
+    deltas, own = [], []
     for i in range(1, len(ts)):
         t0, t1 = ts[i - 1], ts[i]
         gap = t1 - t0
@@ -203,7 +203,26 @@ def approach(sol, dec, side="inv", radius=SENSE_RADIUS):
             was = math.dist((prev[0], prev[1]), (cx, cz))
             now = math.dist((e[0], e[1]), (cx, cz))
             deltas.append(now - was)
-    return (st.median(deltas) if deltas else float("nan")), len(deltas)
+
+            # OWN-MOTION measure, and it answers a DIFFERENT question from the one above.
+            #
+            # `now - was` is the change in DISTANCE to a centroid that is itself moving. If the
+            # enemy advances faster than the man retreats, it reports "closing" even though the
+            # man moved away - so it cannot distinguish "he ran the wrong way" from "he ran the
+            # right way and they chased him". That ambiguity is exactly what made ROUT read
+            # -0.91 m/frame and look like a defect while fallbackFrom() is geometrically correct
+            # (pos - ec is the vector FROM the enemy; it moves 40 m further along it).
+            #
+            # This projects the SOLDIER'S OWN displacement onto the unit vector pointing away
+            # from the enemy centroid AT THE START FRAME. The axis is fixed, so the enemy's
+            # movement cannot contaminate it. POSITIVE = he moved away under his own steam.
+            ax, az = prev[0] - cx, prev[1] - cz
+            amag = math.hypot(ax, az)
+            if amag > 0.001:
+                ax, az = ax / amag, az / amag
+                own.append((e[0] - prev[0]) * ax + (e[1] - prev[1]) * az)
+    return ((st.median(deltas) if deltas else float("nan")), len(deltas),
+            (st.median(own) if own else float("nan")))
 
 
 def near_vehicle(sol, veh, dec, name_sub=None, radius=25):
@@ -632,11 +651,14 @@ def main():
     # ---- 5c : direction relative to the LOCAL sensed enemy, and order sequencing
     # A scalar displacement cannot tell a rout from a charge. These can.
     print("\n--- direction vs the enemy the man can SEE (- closes, + withdraws)")
-    print("   %-24s %8s %8s   %s" % ("decision", "m/frame", "n", "expected"))
+    print("   %-24s %8s %9s %8s   %s"
+          % ("decision", "vs foe", "own move", "n", "expected"))
+    print("   (vs foe = change in distance to a MOVING enemy centroid; own move = the soldier's")
+    print("    OWN displacement along the fixed away-from-enemy axis. POSITIVE = away.)")
     EXPECT = {3: "AWAY", 4: "AWAY", 1: "AWAY (break contact)",
               8: "CLOSE", 9: "CLOSE", 28: "CLOSE", 20: "CLOSE", 21: "CLOSE", 22: "CLOSE"}
     for dec in sorted(DEC_NAMES):
-        d, n = approach(sol, dec)
+        d, n, ownd = approach(sol, dec)
         if n < 5:                     # under five samples is not a direction, it is noise
             continue
         want = EXPECT.get(dec, "")
@@ -644,13 +666,16 @@ def main():
         # 0.5 m/frame deadband: a median of exactly 0.00 means the men did not move at all, which
         # is a DIFFERENT fault from moving the wrong way, and mislabelling it "moves away" would be
         # the same sloppiness this tool exists to prevent.
-        if want and abs(d) < 0.5:
+        # Judge on OWN motion where available: it is the unambiguous signal.
+        j = ownd if ownd == ownd else d
+        if want and abs(j) < 0.5:
             flag = "  <-- STATIC (ordered to move, did not)" if want == "CLOSE" else "  <-- STATIC"
-        elif want.startswith("AWAY") and d <= -0.5:
+        elif want.startswith("AWAY") and j <= -0.5:
             flag = "  <-- MOVES TOWARD THE ENEMY"
-        elif want == "CLOSE" and d >= 0.5:
+        elif want == "CLOSE" and j >= 0.5:
             flag = "  <-- MOVES AWAY FROM THE ENEMY"
-        print("   %-24s %+8.2f %8d   %s%s" % (DEC_NAMES[dec], d, n, want, flag))
+        print("   %-24s %+8.2f %+9.2f %8d   %s%s"
+              % (DEC_NAMES[dec], d, ownd, n, want, flag))
 
     print("\n--- soldier-to-vehicle join, ADVANCE-behind-armour (ARMOUR_HUG is 6 m)")
     m, n, names = near_vehicle(sol, veh, 20)
