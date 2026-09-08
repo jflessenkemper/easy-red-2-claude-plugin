@@ -259,12 +259,17 @@ function heightColour(y){
   return `rgb(${r},${g},${b})`;
 }
 // Decision families, so the eye groups behaviour rather than reading 31 separate hues.
+// Every code the brain can emit MUST have an entry, or it falls through to the same grey as
+// code 0 "unknown" and becomes indistinguishable from missing data. Enforced by
+// er2-realistic/tests/dec_map_check.py. Code 7 (AT-hold-cover) was retired 2026-09-08.
 const DECCOL = {
   28:'#5b9dd9', 27:'#5b9dd9', 20:'#7fc4ff', 21:'#7fc4ff', 22:'#7fc4ff',   // moving up
+  30:'#3f7fb8', 31:'#3f7fb8', 29:'#8fb0c9',                               // transport / base AI
   23:'#c9a227', 19:'#c9a227', 18:'#c9a227', 24:'#c9a227', 25:'#c9a227', 26:'#c9a227', // holding/firing
   10:'#c4443a', 3:'#e06c5a', 4:'#e06c5a', 1:'#e06c5a',                    // pinned / broken
-  11:'#5fb87a', 12:'#5fb87a', 13:'#5fb87a', 14:'#5fb87a', 15:'#5fb87a',   // medical
-  5:'#b07cc6', 6:'#b07cc6', 7:'#b07cc6', 8:'#d98cb0', 9:'#d98cb0',        // AT / assault
+  11:'#5fb87a', 12:'#5fb87a', 13:'#5fb87a', 14:'#5fb87a', 15:'#5fb87a', 16:'#3f8f58', // medical
+  17:'#e8a33d',                                                           // fire mission
+  5:'#b07cc6', 6:'#b07cc6', 8:'#d98cb0', 9:'#d98cb0',                     // AT / assault
   2:'#6e7681', 0:'#4a5058',                                               // mounted / unknown
 };
 
