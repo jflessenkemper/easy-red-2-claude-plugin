@@ -78,6 +78,11 @@ COVER_ORDERS = {
 }
 EXEMPT_ORDERS = {
     "MOUNTED/CREW-defer", "ADVANCE-baseAI",
+    # FORM-followLeader hands formation to the ENGINE's own squad order. The brain issues no
+    # moveTo at all, so neither speed threshold can judge it and displacement is whatever the
+    # engine decides - exactly the situation EXEMPT exists for. Its geometry is measurable only
+    # from telemetry (movement_audit.formation(dec=32)), never from this gate.
+    "FORM-followLeader",
 }
 # Orders judged by whether they achieve their PURPOSE rather than by a speed threshold.
 # An approach march succeeds by CLOSING ON THE OBJECTIVE, not by sustaining a given pace: a real

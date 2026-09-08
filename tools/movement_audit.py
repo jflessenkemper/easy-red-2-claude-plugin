@@ -86,7 +86,7 @@ DEC_NAMES = {
     20: "ADVANCE-behind-armour", 21: "BOUND-move", 22: "BOUND-move-cover",
     23: "BOUND-overwatch", 24: "FIGHT-from-cover", 25: "DEFEND-hold",
     26: "CONSOLIDATE", 27: "RALLY-on-MG", 28: "ROAD-MARCH", 29: "ADVANCE-baseAI",
-    30: "RETURN-to-transport", 31: "REBOARD-transport",
+    30: "RETURN-to-transport", 31: "REBOARD-transport", 32: "FORM-followLeader",
 }
 
 
