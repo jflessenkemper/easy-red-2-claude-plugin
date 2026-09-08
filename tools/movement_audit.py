@@ -62,9 +62,9 @@ def load(path):
                 p = e.split(",")
                 try:
                     if len(p) >= 5:      # uid,x,y,z,name
-                        veh[t].append((int(p[1]), int(p[3])))
+                        veh[t].append((int(p[1]), int(p[3]), p[4].strip()))
                     elif len(p) >= 4:
-                        veh[t].append((int(p[1]), int(p[2])))
+                        veh[t].append((int(p[1]), int(p[2]), ""))
                 except (ValueError, IndexError):
                     pass
     return sol, veh
@@ -130,7 +130,7 @@ def formation(sol, veh, dec=None):
                 continue
             # Mounted men all report the VEHICLE's position, so a truckload reads as nine men on
             # one spot. This faked a 1.0 m median spacing that was really 32 m.
-            if e[4] == 1 or (e[4] == -1 and vs and min(math.dist((x, z), v) for v in vs) <= 4):
+            if e[4] == 1 or (e[4] == -1 and vs and min(math.dist((x, z), v[:2]) for v in vs) <= 4):
                 continue
             squads.setdefault(sq, []).append(((x, z), ((x - prev[0]) / d, (z - prev[1]) / d)))
         for sq, pts in squads.items():
@@ -153,6 +153,150 @@ def formation(sol, veh, dec=None):
             st.median(lon) if lon else float("nan"),
             st.median(ratio) if ratio else float("nan"),
             frames, samples)
+
+
+SENSE_RADIUS = 90            # must match Realistic.lua: the brain's own sensing horizon
+
+
+def approach(sol, dec, side="inv", radius=SENSE_RADIUS):
+    """Did men on this decision move TOWARD or AWAY FROM the enemy THEY CAN SEE? Signed m/frame.
+
+    Scalar displacement cannot answer this, and several pass criteria are exactly this question:
+    ROUT must move AWAY, ASSAULT must CLOSE, a bailed-out crew must break contact. A man can cover
+    40 m on either and the existing `net` figure reads identically.
+
+    Returns (median_delta, n). NEGATIVE = closing, POSITIVE = withdrawing.
+
+    The reference is the centroid of enemies within `radius` OF THAT MAN, recomputed per man per
+    frame, deliberately matching the brain's own SENSE_RADIUS -- because the brain decides against
+    what it senses, so that is the only reference the decision can be judged against.
+
+    A GLOBAL enemy centroid, which is what this first computed, is worse than useless: it made
+    both ROUT (-2.21) and ASSAULT (+1.97) come out INVERTED on the banked control. ASSAULT fires
+    at <=35 m and ROUT at 40 m; both are local actions, and on a battalion-scale map the army's
+    average position is nowhere near the fight a given man is in. Two whole classes of result
+    reading wrong at once was the tell that the instrument, not the mod, was broken.
+    """
+    ts = sorted(sol)
+    other = "def" if side == "inv" else "inv"
+    deltas = []
+    for i in range(1, len(ts)):
+        t0, t1 = ts[i - 1], ts[i]
+        gap = t1 - t0
+        if gap <= 0 or gap > 20:
+            continue
+        foe = [(e[0], e[1]) for e in sol[t0].values() if side_of(e[2]) == other]
+        if not foe:
+            continue
+        for uid, e in sol[t1].items():
+            if e[5] != dec or side_of(e[2]) != side or e[4] == 1:
+                continue
+            prev = sol[t0].get(uid)
+            if not prev:
+                continue
+            if math.dist((prev[0], prev[1]), (e[0], e[1])) / gap > 25:
+                continue                     # teleport / respawn
+            local = [p for p in foe if math.dist((prev[0], prev[1]), p) <= radius]
+            if len(local) < 2:               # no sensed enemy: nothing to close on or flee from
+                continue
+            cx = st.mean(p[0] for p in local); cz = st.mean(p[1] for p in local)
+            was = math.dist((prev[0], prev[1]), (cx, cz))
+            now = math.dist((e[0], e[1]), (cx, cz))
+            deltas.append(now - was)
+    return (st.median(deltas) if deltas else float("nan")), len(deltas)
+
+
+def near_vehicle(sol, veh, dec, name_sub=None, radius=25):
+    """Join soldiers on a decision to the nearest NAMED vehicle. Returns (median_m, n, names).
+
+    ADVANCE-behind-armour claims men sit ~ARMOUR_HUG 6 m behind a hull; nothing could check it,
+    because no tool joined a soldier to a vehicle. `name_sub` filters to a vehicle whose name
+    contains that substring, which is how the T6 negative control works: with an Opel Blitz
+    instead of a halftrack the branch must not qualify at all.
+
+    Caveat worth stating: ARMOUR_HUG 6 m and ARMOUR_SPREAD 2.5 m are both sub-sigma against the
+    engine's ~13 m pathing scatter, so treat a single figure here as weak evidence.
+    """
+    ts = sorted(sol)
+    ds, seen = [], defaultdict(int)
+    for t in ts:
+        vs = veh.get(t, [])
+        if name_sub:
+            vs = [v for v in vs if name_sub.lower() in (v[2] or "").lower()]
+        if not vs:
+            continue
+        for uid, e in sol[t].items():
+            if e[5] != dec or e[4] == 1:
+                continue
+            best, bn = 1e9, None
+            for v in vs:
+                d = math.dist((e[0], e[1]), v[:2])
+                if d < best:
+                    best, bn = d, v[2]
+            if best <= radius:
+                ds.append(best)
+                seen[bn or "(unnamed)"] += 1
+    return (st.median(ds) if ds else float("nan")), len(ds), dict(seen)
+
+
+def sequences(sol):
+    """Ordered transitions, alternation ratios and election uniqueness.
+
+    Three pass criteria that nothing could check:
+      * DRAG-approach -> DRAG-pickup -> DRAG-to-cover must occur IN THAT ORDER for one man
+      * BOUND-move : BOUND-overwatch must sit near 1:1 (the squad alternates halves every 8 s)
+      * exactly ONE man may be elected to a casualty, or two men fight over the same body
+
+    `dec` is latched change-only in telemetry, so a per-soldier decision sequence is a sequence of
+    CHANGES, which is exactly what a transition check wants.
+    """
+    ts = sorted(sol)
+    seq = defaultdict(list)
+    for t in ts:
+        for uid, e in sol[t].items():
+            d = e[5]
+            if d == 0:
+                continue
+            if not seq[uid] or seq[uid][-1][1] != d:
+                seq[uid].append((t, d))
+
+    out = {}
+    # DRAG: 13 approach -> 14 pickup. A pickup with NO preceding approach is not automatically
+    # wrong - CARRY_ADJACENT is 3 m, so a man already standing on the casualty short-circuits
+    # straight to pickup. Reported as "direct" rather than "bad" for that reason.
+    ordered = direct = 0
+    for uid, s in seq.items():
+        codes = [d for _, d in s]
+        for i in range(len(codes) - 1):
+            if codes[i] == 13 and 14 in codes[i + 1:i + 3]:
+                ordered += 1
+            elif codes[i] == 14 and (i == 0 or codes[i - 1] != 13):
+                direct += 1
+    out["drag_ordered_vs_direct_pickup"] = (ordered, direct)
+
+    # BOUND alternation: count men-frames, not transitions, so a long bound is not one tick
+    mv = sum(1 for t in ts for e in sol[t].values() if e[5] in (21, 22))
+    ow = sum(1 for t in ts for e in sol[t].values() if e[5] == 23)
+    out["bound_move_vs_overwatch"] = (mv, ow, (mv / ow) if ow else float("nan"))
+
+    # Concurrent draggers MAP-WIDE. This is deliberately NOT the "exactly one man per casualty"
+    # claim: telemetry carries no casualty identity, so twelve draggers may be twelve men each on
+    # a different body, which is correct behaviour. What it CAN catch is a runaway - a figure of
+    # the same order as the whole battalion means the election is not electing.
+    worst = 0
+    for t in ts:
+        worst = max(worst, sum(1 for e in sol[t].values() if e[5] in (13, 14, 15)))
+    out["max_concurrent_draggers_mapwide"] = worst
+    # Cluster them by proximity: draggers within 30 m (DRAG_RADIUS) of each other in one frame
+    # are plausibly contesting ONE casualty, which IS the uniqueness question.
+    clustered = 0
+    for t in ts:
+        pts = [(e[0], e[1]) for e in sol[t].values() if e[5] in (13, 14, 15)]
+        for i, p in enumerate(pts):
+            n = sum(1 for j, q in enumerate(pts) if j != i and math.dist(p, q) <= 30)
+            clustered = max(clustered, n + 1)
+    out["max_draggers_within_30m"] = clustered
+    return out
 
 
 def headline(sol, veh):
@@ -378,7 +522,7 @@ def main():
             d = math.dist((prev[0], prev[1]), (x, z))
             if d < 1.0 or d > 40:
                 continue                     # stationary, or a boarding jump
-            if e[4] == 1 or (e[4] == -1 and vs and min(math.dist((x, z), v) for v in vs) <= 4):
+            if e[4] == 1 or (e[4] == -1 and vs and min(math.dist((x, z), v[:2]) for v in vs) <= 4):
                 continue                     # mounted: reports the vehicle position
             pts.append(((x, z), ((x - prev[0]) / d, (z - prev[1]) / d)))
         if len(pts) < 6:
@@ -485,6 +629,55 @@ def main():
     if not hdr:
         print("   no decision code had a measurable squad-frame")
 
+    # ---- 5c : direction relative to the LOCAL sensed enemy, and order sequencing
+    # A scalar displacement cannot tell a rout from a charge. These can.
+    print("\n--- direction vs the enemy the man can SEE (- closes, + withdraws)")
+    print("   %-24s %8s %8s   %s" % ("decision", "m/frame", "n", "expected"))
+    EXPECT = {3: "AWAY", 4: "AWAY", 1: "AWAY (break contact)",
+              8: "CLOSE", 9: "CLOSE", 28: "CLOSE", 20: "CLOSE", 21: "CLOSE", 22: "CLOSE"}
+    for dec in sorted(DEC_NAMES):
+        d, n = approach(sol, dec)
+        if n < 5:                     # under five samples is not a direction, it is noise
+            continue
+        want = EXPECT.get(dec, "")
+        flag = ""
+        # 0.5 m/frame deadband: a median of exactly 0.00 means the men did not move at all, which
+        # is a DIFFERENT fault from moving the wrong way, and mislabelling it "moves away" would be
+        # the same sloppiness this tool exists to prevent.
+        if want and abs(d) < 0.5:
+            flag = "  <-- STATIC (ordered to move, did not)" if want == "CLOSE" else "  <-- STATIC"
+        elif want.startswith("AWAY") and d <= -0.5:
+            flag = "  <-- MOVES TOWARD THE ENEMY"
+        elif want == "CLOSE" and d >= 0.5:
+            flag = "  <-- MOVES AWAY FROM THE ENEMY"
+        print("   %-24s %+8.2f %8d   %s%s" % (DEC_NAMES[dec], d, n, want, flag))
+
+    print("\n--- soldier-to-vehicle join, ADVANCE-behind-armour (ARMOUR_HUG is 6 m)")
+    m, n, names = near_vehicle(sol, veh, 20)
+    if n:
+        top = sorted(names.items(), key=lambda kv: -kv[1])[:4]
+        print("   median distance to nearest vehicle %.1f m over %d man-frames" % (m, n))
+        print("   nearest vehicle was: " + ", ".join("%s x%d" % (k, v) for k, v in top))
+        print("   NOTE ARMOUR_HUG 6 m and ARMOUR_SPREAD 2.5 m are both sub-sigma against ~13 m")
+        print("        pathing scatter, so treat one figure as weak evidence.")
+    else:
+        print("   no ADVANCE-behind-armour man-frames with a vehicle in range")
+
+    print("\n--- order sequencing, alternation and election")
+    sq = sequences(sol)
+    o, dr = sq["drag_ordered_vs_direct_pickup"]
+    print("   DRAG approach->pickup ordered %d, straight-to-pickup %d "
+          "(the latter is legitimate inside CARRY_ADJACENT 3 m)" % (o, dr))
+    mv, ow, rat = sq["bound_move_vs_overwatch"]
+    verdict = "~1:1 as designed" if 0.6 <= rat <= 1.7 else "NOT the designed 1:1 alternation"
+    print("   BOUND move %d : overwatch %d  ratio %.2f  %s"
+          % (mv, ow, rat, verdict) if rat == rat else
+          "   BOUND move %d : overwatch %d  (no overwatch frames)" % (mv, ow))
+    print("   max concurrent draggers map-wide %d, within 30 m of each other %d"
+          % (sq["max_concurrent_draggers_mapwide"], sq["max_draggers_within_30m"]))
+    print("   (map-wide is NOT the uniqueness test - telemetry has no casualty identity, so")
+    print("    twelve draggers may be twelve separate bodies. The 30 m figure is the real one.)")
+
     # ---- 6 : spacing, mounted excluded
     print("\n--- spacing: nearest neighbour, mounted troops EXCLUDED")
     for tag, name in (("Ii", "inv"), ("Dd", "def")):
@@ -493,7 +686,7 @@ def main():
             vs = veh.get(t, [])
             pts = [(e[0], e[1]) for e in sol[t].values() if e[2] in tag and e[4] != 1]
             if vs:
-                pts = [p for p in pts if min(math.dist(p, v) for v in vs) > 4]
+                pts = [p for p in pts if min(math.dist(p, v[:2]) for v in vs) > 4]
             if len(pts) < 10:
                 continue
             nn = [min(math.dist(p, q) for j, q in enumerate(pts) if j != i)
