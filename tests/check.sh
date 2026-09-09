@@ -147,6 +147,29 @@ print("ok    socket path consistent across server.py, .mcp.json and the launch-o
 PY2
 if [ $? -eq 0 ]; then ok "harness socket path agrees everywhere"; else bad "harness socket path disagrees between sources"; fi
 
+echo "== 11. Every doc path the MCP tools cite is actually SHIPPED in the plugin =="
+# er2_play_mission's description told the reader to consult docs/ui-map.md THREE times, while that
+# file existed only at REPO root - outside plugins/easy-red-2/. An installed plugin therefore
+# pointed users at a file they did not have. Nothing errors; the advice is just dead.
+python3 - <<'PY2'
+import os, re, sys
+ROOT = "plugins/easy-red-2"
+src = open(os.path.join(ROOT, "tools/er2_mcp/server.py")).read()
+# only paths that look plugin-relative, e.g. docs/ui-map.md
+cited = sorted(set(re.findall(r'\b(docs/[A-Za-z0-9_.-]+\.md)\b', src)))
+missing = [c for c in cited if not os.path.exists(os.path.join(ROOT, c))]
+if not cited:
+    print("ok    no plugin-relative doc paths cited by the tools")
+    sys.exit(0)
+if missing:
+    for m in missing:
+        print("FAIL  the tools cite %r but %s/%s does not exist - an installed plugin would point "
+              "the user at a file it does not ship" % (m, ROOT, m))
+    sys.exit(1)
+print("ok    all %d cited doc path(s) ship inside the plugin: %s" % (len(cited), ", ".join(cited)))
+PY2
+if [ $? -eq 0 ]; then ok "cited doc paths are shipped"; else bad "the plugin cites a doc it does not ship"; fi
+
 echo
 echo "-------------------------------------------"
 printf 'PASS %d   FAIL %d\n' "$PASS" "$FAIL"
