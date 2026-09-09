@@ -96,6 +96,57 @@ print("  \033[32mPASS\033[0m  plugin.json and CHANGELOG agree on %s" % man)
 PY
 [ $? -eq 0 ] && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
 
+echo "== 10. The harness socket path agrees across all three sources =="
+# THREE places name this socket and they had DRIFTED into two different values:
+#   server.py           ~/.er2harness.sock   (correct - the MCP server listens here)
+#   fix_steam_launch..  ~/.er2harness.sock   (correct - written into the Steam launch options)
+#   .mcp.json           /tmp/ER2Harness.sock (WRONG - and it OVERRIDES the server default)
+#   that tool's printed "Control socket:" line  /tmp/ER2Harness.sock (WRONG, hardcoded)
+# Because .mcp.json's env wins, an INSTALLED plugin pointed its MCP server at a socket the
+# harness never creates, so every tool would fail with "harness socket not found" and the
+# via_steam path could never connect. Nothing in the code errors - the paths just never meet.
+python3 - <<'PY2'
+import json, re, sys
+
+mcp = json.load(open("plugins/easy-red-2/.mcp.json"))
+env = mcp["mcpServers"]["easy-red-2"].get("env", {})
+mcp_sock = env.get("ER2_HARNESS_SOCK", "")
+
+srv = open("plugins/easy-red-2/tools/er2_mcp/server.py").read()
+m = re.search(r'SOCK\s*=\s*os\.environ\.get\("ER2_HARNESS_SOCK"\)\s*or\s*os\.path\.join\(HOME,\s*"([^"]+)"\)', srv)
+srv_sock = m.group(1) if m else None
+
+fx = open("tools/fix_steam_launch_options.py").read()
+m2 = re.search(r'^SOCKET\s*=\s*os\.path\.join\(HOME,\s*"([^"]+)"\)', fx, re.M)
+fx_sock = m2.group(1) if m2 else None
+
+fail = []
+if srv_sock is None:
+    fail.append("could not parse SOCK out of server.py")
+if fx_sock is None:
+    fail.append("could not parse SOCKET out of fix_steam_launch_options.py")
+if srv_sock and fx_sock and srv_sock != fx_sock:
+    fail.append("server.py uses ~/%s but fix_steam_launch_options.py writes ~/%s into the launch "
+                "options - the harness would listen where the server is not looking"
+                % (srv_sock, fx_sock))
+# .mcp.json may leave it unset, or default it to the SAME path; it must never name a different one.
+if srv_sock and mcp_sock and srv_sock not in mcp_sock:
+    fail.append(".mcp.json defaults ER2_HARNESS_SOCK to %r, which does not contain the server's "
+                "own path %r. This env value OVERRIDES the server default, so an installed plugin "
+                "would look for a socket the harness never creates." % (mcp_sock, srv_sock))
+# the printed hint must be derived, not hardcoded to some other path
+if re.search(r'Control socket: */tmp/', fx) or '"/tmp/ER2Harness.sock")' in fx:
+    fail.append("fix_steam_launch_options.py still hardcodes a /tmp control-socket path in its "
+                "output instead of printing SOCKET")
+
+if fail:
+    for f in fail:
+        print("FAIL  " + f)
+    sys.exit(1)
+print("ok    socket path consistent across server.py, .mcp.json and the launch-options writer")
+PY2
+if [ $? -eq 0 ]; then ok "harness socket path agrees everywhere"; else bad "harness socket path disagrees between sources"; fi
+
 echo
 echo "-------------------------------------------"
 printf 'PASS %d   FAIL %d\n' "$PASS" "$FAIL"

@@ -7,7 +7,7 @@
         "${CLAUDE_PLUGIN_ROOT}/tools/er2_mcp/server.py"
       ],
       "env": {
-        "ER2_HARNESS_SOCK": "${ER2_HARNESS_SOCK:-/tmp/ER2Harness.sock}"
+        "ER2_HARNESS_SOCK": "${ER2_HARNESS_SOCK:-${HOME}/.er2harness.sock}"
       }
     }
   }

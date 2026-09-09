@@ -172,9 +172,11 @@ def main() -> None:
         print("  -> WRITTEN (backup: %s)" % bak)
 
     if a.apply and not a.clear:
+        # DERIVED, never hardcoded. This line used to print /tmp/ER2Harness.sock while SOCKET
+        # (the path actually written into the launch options) was ~/.er2harness.sock, so the tool
+        # told you to watch a socket the harness never creates.
         print("\nDone. Start Steam and launch Easy Red 2 normally — it will come up headless "
-              "inside the harness with DLC entitlements visible.\nControl socket: "
-              "/tmp/ER2Harness.sock")
+              "inside the harness with DLC entitlements visible.\nControl socket: %s" % SOCKET)
 
 
 if __name__ == "__main__":
