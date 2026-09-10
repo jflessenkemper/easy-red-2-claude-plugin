@@ -170,6 +170,68 @@ print("ok    all %d cited doc path(s) ship inside the plugin: %s" % (len(cited),
 PY2
 if [ $? -eq 0 ]; then ok "cited doc paths are shipped"; else bad "the plugin cites a doc it does not ship"; fi
 
+echo "== 12. The guard hooks actually refuse what they claim to =="
+# A hook nobody has watched refuse something is not a hook. Both of these guard rules were broken
+# for real on 2026-09-08: a pkill -9 destroyed the Steam login session, and a mute loop over every
+# sink-input silenced the user's other game AND a live voice call. This check drives the guard with
+# both the dangerous forms (must block, rc=2) and the legitimate lookalikes (must allow, rc=0) -
+# the allow cases matter just as much, because a guard that blocks `steam -shutdown` or our own
+# harness kill would make the plugin unusable.
+python3 - <<'PY2'
+import json, os, subprocess, sys
+
+ROOT = "plugins/easy-red-2"
+guard = os.path.join(ROOT, "scripts/guard-bash.sh")
+hooks = os.path.join(ROOT, "hooks/hooks.json")
+fail = []
+
+if not os.path.exists(hooks):
+    fail.append("hooks/hooks.json is missing - the operational rules are back to being comments")
+else:
+    cfg = json.load(open(hooks)).get("hooks", {})
+    for ev in ("PreToolUse", "Stop"):
+        if ev not in cfg:
+            fail.append("hooks.json no longer registers a %s hook" % ev)
+
+if not os.path.exists(guard):
+    fail.append("scripts/guard-bash.sh is missing")
+else:
+    MUST_BLOCK = [
+        "pkill -9 -x steam",
+        "pkill -9 steam",
+        "killall -9 steam",
+        "kill -SIGKILL $(pidof steam)",
+        "pactl set-sink-mute @DEFAULT_SINK@ 1",
+        "for i in $(pactl list short sink-inputs | cut -f1); do pactl set-sink-input-mute $i 1; done",
+    ]
+    MUST_ALLOW = [
+        "steam -shutdown",
+        "pkill -9 -x AOE3DEHarness",
+        "pactl move-sink-input 2250 er2_silence",
+        "pactl list short sinks",
+        "pidof steam",
+    ]
+    def rc(cmd):
+        r = subprocess.run([guard], input=json.dumps({"tool_input": {"command": cmd}}),
+                           capture_output=True, text=True, timeout=30)
+        return r.returncode
+    for c in MUST_BLOCK:
+        got = rc(c)
+        if got != 2:
+            fail.append("guard ALLOWED a dangerous command (rc=%d, expected 2): %s" % (got, c))
+    for c in MUST_ALLOW:
+        got = rc(c)
+        if got != 0:
+            fail.append("guard BLOCKED a legitimate command (rc=%d, expected 0): %s" % (got, c))
+
+if fail:
+    for f in fail:
+        print("FAIL  " + f)
+    sys.exit(1)
+print("ok    guard hooks block 6 dangerous forms and allow 5 legitimate lookalikes")
+PY2
+if [ $? -eq 0 ]; then ok "guard hooks enforce the operational rules"; else bad "guard hooks do not enforce what they claim"; fi
+
 echo
 echo "-------------------------------------------"
 printf 'PASS %d   FAIL %d\n' "$PASS" "$FAIL"

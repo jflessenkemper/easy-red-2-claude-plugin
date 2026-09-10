@@ -8,7 +8,9 @@
       ],
       "env": {
         "ER2_HARNESS_SOCK": "${ER2_HARNESS_SOCK:-${HOME}/.er2harness.sock}"
-      }
+      },
+      "alwaysLoad": true,
+      "timeout": 600000
     }
   }
 }

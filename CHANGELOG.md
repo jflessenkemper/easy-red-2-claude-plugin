@@ -4,6 +4,39 @@ All notable changes to the **easy-red-2** Claude Code plugin.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0]
+
+### Added
+- **`hooks/hooks.json` — the operational rules are now ENFORCED, not documented.** Both guarded
+  rules were broken for real on 2026-09-08: a `pkill -9` destroyed the Steam login session and
+  blocked the whole task, and a mute loop over every sink-input silenced the user's other game
+  *and* a live voice call. A `PreToolUse` guard on Bash now refuses force-kills aimed at Steam and
+  refuses `@DEFAULT_SINK@` mutes / all-sink-input sweeps, with the reason on stderr so the refusal
+  teaches rather than just fails. A `Stop` guard refuses to end a session while a diagnostic build
+  is still deployed. Gated by check 12, which drives the guard with 6 dangerous forms (must block)
+  AND 5 legitimate lookalikes (must allow) — `steam -shutdown` and killing our own harness have to
+  keep working.
+- `alwaysLoad: true` on the MCP server so its tools are not deferred behind a `ToolSearch` call
+  every turn. NOTE: the documented examples for this field are `http`/`ws` servers; ours is
+  `stdio`, so this is unverified for stdio and harmless if ignored.
+- `timeout: 600000` (10 min) — `er2_launch` and `er2_play_mission` both exceed the 2-minute
+  auto-background threshold, and that backgrounding is disabled in non-interactive mode.
+- `_meta` `anthropic/maxResultSizeChars: 500000` on `er2_log`. `Player.log` runs to tens of
+  megabytes and the default result threshold is 25,000 tokens — a truncated tail is how you
+  conclude "no errors" from a log that was cut before the errors. Deliberately NOT applied to
+  `er2_screenshot`: image data stays bound by `MAX_MCP_OUTPUT_TOKENS` and cannot be raised this
+  way, so that limit is documented instead of pretended away.
+- `$schema` on the manifest for editor validation.
+
+### Fixed
+- `docs/ui-map.md` is now shipped INSIDE the plugin. Tool descriptions cited it three times while
+  it existed only at repo root, so an installed plugin pointed users at a file it did not ship.
+  Gated by check 11.
+
+### Notes
+- Tool descriptions were audited against the 2KB truncation limit: the largest is 489 chars, so
+  that risk does not currently apply.
+
 ## [1.4.0] — 2026-08-30
 
 ### Fixed

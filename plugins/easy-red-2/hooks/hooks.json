@@ -1,0 +1,28 @@
+{
+  "description": "Enforce the two operational rules that have actually been broken on this project, plus refuse to finish with a diagnostic build deployed",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/guard-bash.sh",
+            "args": []
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/guard-stop.sh",
+            "args": []
+          }
+        ]
+      }
+    ]
+  }
+}

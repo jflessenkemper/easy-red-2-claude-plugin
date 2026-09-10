@@ -1074,6 +1074,13 @@ TOOLS = {
             "scale": {"type": "integer", "description": "screenshot downscale width"}}},
     },
     "er2_log": {
+        # OUTPUT CEILING, RAISED DELIBERATELY. The default MCP result threshold is 25,000 tokens
+        # (warning at 10,000), and Player.log runs to tens of megabytes - a truncated tail is how
+        # you conclude "no errors" from a log that was cut before the errors. 500,000 chars is the
+        # documented hard ceiling. TEXT ONLY: tools returning image data stay bound by
+        # MAX_MCP_OUTPUT_TOKENS and cannot be raised this way, which is why er2_screenshot does
+        # NOT get this and its limit is documented instead of pretended away.
+        "_meta": {"anthropic/maxResultSizeChars": 500000},
         "fn": t_log,
         "description": "Read the ER2 Player.log filtered to the mod's telemetry. tag: 'realistic' "
                        "(per-soldier decisions), 'events' (kill feed/objectives), 'bench' (API probe), "
