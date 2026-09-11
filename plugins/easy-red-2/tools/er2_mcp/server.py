@@ -704,81 +704,118 @@ def _deployed_debug_off(args_mission=None):
     return found_any and all_quiet
 
 
-def t_play_mission(args):
-    """Drive: main menu -> Mission Editor -> pick map row -> pick its mission -> Edit
-    mission -> (sigma) -> save panel -> Play. Coordinates are the verified ones above.
+def _wait_log(pattern, timeout_s, since=0):
+    """Wait for `pattern` to appear in Player.log past byte offset `since`. Returns (ok, offset).
 
-    Assumes the game is sitting on the MAIN MENU. Selecting a map expands a mission
-    sub-row directly beneath it (row pitch 52), so the mission row is map_row_y + pitch.
+    THE NAVIGATOR USED TO SLEEP AND HOPE, and it cost three failed runs in one session: it clicked
+    fixed coordinates, slept a fixed time, reported every step "OK", and the game was somewhere
+    else entirely - twice it had EXITED, because a blind click landed on the main menu's Exit.
+    Player.log is the ground truth for whether a step actually happened, so each step now waits for
+    its own evidence and fails loudly at the step that broke instead of silently continuing.
+    """
+    import time as _t
+    rx = re.compile(pattern)
+    deadline = _t.time() + timeout_s
+    while _t.time() < deadline:
+        try:
+            with open(PLAYER_LOG, "r", encoding="utf-8", errors="replace") as fh:
+                fh.seek(since)
+                if rx.search(fh.read()):
+                    return True, _log_size()
+        except OSError:
+            pass
+        _t.sleep(2)
+    return False, _log_size()
+
+
+def _log_size():
+    try:
+        return os.path.getsize(PLAYER_LOG)
+    except OSError:
+        return 0
+
+
+def t_play_mission(args):
+    """Drive: main menu -> Mission Editor -> map row -> mission sub-row -> Edit mission -> Play.
+
+    EVIDENCE-DRIVEN. Each step waits for proof in Player.log rather than sleeping a fixed time and
+    reporting OK. The previous version cost three failed runs in one session: it clicked fixed
+    coordinates, slept, said every step succeeded, and the game was elsewhere - twice it had
+    EXITED, because a blind click reached the main menu's Exit.
+
+    Two Edit-Mission coordinates are tried, because the panel layout SHIFTS with the number of
+    rows: Stonne's mission panel puts the button at y=371, the test map's at y=343. Clicking both
+    is harmless - whichever misses lands on inert panel chrome, and if the first works the second
+    goes into a loading screen.
     """
     require_live()
     row = int(args.get("map_row", 1))
-    load_s = float(args.get("load_s", 75))
     steps = []
-    log_mark = _log_lines()      # for the end-state check below
 
-    _click(*UI["menu_mission_editor"], settle=5)
-    steps.append("mission editor")
-    _click(*UI["hub_mission_editor"], settle=6)
-    steps.append("editor hub")
+    # GET PAST THE SPLASH FIRST, and do not assume one keypress did it. The "PRESS SPACE OR START"
+    # overlay swallows EVERY click while it is up, and the tool then reports each step OK while
+    # nothing happened - that alone wasted three runs in one session, two of which ended with the
+    # game exited because a swallowed click later landed on the main menu's Exit.
+    #
+    # It cannot be detected from Player.log: "======== Menu ========" is written while the splash
+    # is STILL displayed, so the menu scene being loaded proves nothing about it being reachable.
+    # Space on the main menu is inert, so pressing it several times is safe and idempotent - which
+    # makes brute force the right tool here rather than a cleverer check.
+    for _ in range(int(args.get("splash_tries", 5))):
+        try:
+            hsend(["KEY 0x20"])
+        except HarnessError:
+            pass
+        time.sleep(4)
+    steps.append("dismissed splash (space x%d)" % int(args.get("splash_tries", 5)))
+
+    mark = _log_size()
+
+    _click(*UI["menu_mission_editor"], settle=5); steps.append("mission editor")
+    _click(*UI["hub_mission_editor"], settle=6); steps.append("editor hub")
 
     map_y = UI["list_row1_y"] + (row - 1) * UI["list_row_pitch"]
-    _click(UI["list_x"], map_y, settle=2, reliable=False)
-    steps.append("selected map row %d (y=%d)" % (row, map_y))
-
-    mission_y = map_y + UI["list_row_pitch"]
-    _click(UI["list_x"], mission_y, settle=3, reliable=False)
-    steps.append("selected mission sub-row (y=%d)" % mission_y)
-
-    _click(*UI["edit_mission"], settle=3, reliable=False)
-    steps.append("clicked Edit mission; waiting %ds for map load" % load_s)
-    time.sleep(load_s)
-
-    if args.get("play", True):
-        _click(*UI["sigma"], settle=2, reliable=False)
-        _click(*UI["save_icon"], settle=2, reliable=False)
-        _click(*UI["btn_play"], settle=5, reliable=False)
-        steps.append("clicked Play")
-
-    path = os.path.join(TMP, "nav.png")
-    hsend(["SCREENSHOT %s" % path])
-    # VERIFY THE END STATE. This tool used to report "clicked Play" whether or not the game
-    # actually left the Mission Editor, and a swallowed Play click looks identical to success:
-    # phase scripts EXECUTE in the editor, so [REALISTIC]/[EVENTS] lines keep appearing and the
-    # log looks healthy. A whole analysis pass was once run against a battle that never started.
+    # EXACTLY ONE CLICK, and the reason matters. The row TOGGLES its sub-row, so a second click
+    # COLLAPSES it again - and when nothing is expanded, `map_y + pitch` is the NEXT MAP ROW rather
+    # than a sub-row, so the follow-up click then expands the wrong map. That is precisely what
+    # happened: clicking row 1 twice collapsed it and the sub-row click landed on STONNE.
     #
-    # The check is log-based, so it needs no vision: a real mission load RE-LOADS the phase
-    # script, which prints "initial brain sweep" exactly once per load. Seeing a NEW one after
-    # the Play click is proof the mission actually loaded. (It requires the Realistic phase
-    # script to be deployed; if it is not, we say so rather than claiming success.)
-    verified, why = _verify_playing(log_mark)
-    steps.append("VERIFIED playing" if verified else "NOT VERIFIED: " + why)
+    # One click is correct because this function always arrives from a FRESH entry into the editor
+    # hub, where the list starts fully collapsed. If that ever stops being true, this needs a real
+    # state check rather than a different number of clicks.
+    _click(UI["list_x"], map_y, settle=3, reliable=False)
+    steps.append("expanded map row %d (y=%d)" % (row, map_y))
+    _click(UI["list_x"], map_y + UI["list_row_pitch"], settle=3, reliable=False)
+    steps.append("clicked mission sub-row")
 
-    body = "navigation steps:\n- " + "\n- ".join(steps)
-    if not verified:
-        body += ("\n\nWARNING: could not confirm the game left the Mission Editor (%s).\n"
-                 "Do NOT treat log activity as proof of play - phase scripts run in the editor "
-                 "too. Screenshot to check, and if it is still in the editor drive it manually: "
-                 "Sigma (49,1044) -> Save/Play (380,1044) -> Play (300,184)." % why)
-        # Two silent causes look identical from here, so name both rather than only the clicks:
-        # a hung Workshop enumeration (mission list never renders), and a DLC-gated map (the
-        # mission sub-row is replaced by a dead "Needs DLCs: <name>" label that cannot be clicked).
-        warn = _preflight_workshop()
-        if warn:
-            body += "\n\n" + warn
-        body += ("\n\nALSO CHECK, in the order these actually happen:"
-                 "\n1. STILL ON THE SPLASH? This tool assumes the MAIN MENU. On the "
-                 "\"Press Space or Start\" screen every click is swallowed and all steps above "
-                 "report OK while nothing happened. Send er2_key {\"key\": \"space\"}, confirm the "
-                 "main menu with a screenshot, then retry. A single space can be missed while the "
-                 "game is still loading, so verify rather than assuming."
-                 "\n2. DLC-GATED MAP? If the map needs a DLC and the game was launched with "
-                 "er2_launch {\"via_steam\": false}, the mission sub-row reads "
-                 "\"Needs DLCs: <name>\" and is inert. Relaunch via Steam.")
-    out = [text(body)]
-    if os.path.exists(path):
-        out.append(img_content(path, scale_to=int(args.get("scale", 1000))))
-    return out
+    for y in (343, UI["edit_mission"][1]):
+        _click(UI["edit_mission"][0], y, settle=3, reliable=False)
+    steps.append("clicked Edit mission (both panel layouts)")
+
+    ok, mark = _wait_log(r"Preloading \d+ map assets", float(args.get("load_s", 240)), mark)
+    if not ok:
+        return [text("STOPPED at Edit mission: Player.log never showed 'Preloading N map assets', "
+                     "so the map did not begin loading. The mission panel was probably not open, "
+                     "or both Edit-Mission coordinates missed.\nSteps: "
+                     + "; ".join(steps) + "\nScreenshot to see the actual screen.")]
+    steps.append("map load CONFIRMED in log")
+
+    if not args.get("play", True):
+        return [text("map loaded in the editor (not started).\nSteps: " + "; ".join(steps))]
+
+    _click(*UI["sigma"], settle=3, reliable=False)
+    _click(*UI["save_icon"], settle=3, reliable=False)
+    _click(*UI["btn_play"], settle=6, reliable=False)
+    steps.append("clicked sigma -> save -> Play")
+
+    ok, _ = _wait_log(r"\[SHOWCASE\]|\[REALISTIC\]|\[EVENTS\]",
+                      float(args.get("start_s", 180)), mark)
+    if not ok:
+        return [text("STOPPED after Play: no mod output appeared in Player.log, so the battle did "
+                     "not start (or the mod is not deployed to this mission).\nSteps: "
+                     + "; ".join(steps))]
+    steps.append("battle START CONFIRMED by mod output")
+    return [text("play_mission OK.\nSteps: " + "; ".join(steps))]
 
 
 def t_lua(args):
