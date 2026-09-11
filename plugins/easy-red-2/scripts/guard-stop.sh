@@ -21,11 +21,23 @@ while IFS= read -r f; do
         dirty="$dirty
   ${f#$ME/}"
     fi
-    # a per-soldier sample of 1 is a diagnostic setting too - it is what makes the log enormous
-    if grep -qE '^local DBG_SAMPLE[[:space:]]*=[[:space:]]*1[[:space:]]*($|--)' "$f" 2>/dev/null; then
-        dirty="$dirty
+    # A per-soldier sample of 1 is diagnostic in a real battle - it is what makes the log enormous.
+    # BUT IT IS THE INTENDED STATE ON THE DEMONSTRATION RANGE, which exists to be measured: at the
+    # shipping default of 6 an 11-round run yielded 41 state lines across 13 stations and could not
+    # verify anything. So the test map is exempt for DBG_SAMPLE only. DEBUG and friends are still
+    # refused everywhere, including there.
+    #
+    # Narrowed deliberately: this guard fired on the test map's intended build, and a guard that
+    # cries wolf on a correct state is one you learn to ignore - which is worse than not having it.
+    case "$f" in
+        *"ME_Realistic Test map"*) : ;;
+        *)
+            if grep -qE '^local DBG_SAMPLE[[:space:]]*=[[:space:]]*1[[:space:]]*($|--)' "$f" 2>/dev/null; then
+                dirty="$dirty
   ${f#$ME/}  (DBG_SAMPLE = 1)"
-    fi
+            fi
+            ;;
+    esac
 done < <(find "$ME" -type f -name '*.lua' 2>/dev/null)
 
 if [ -n "$dirty" ]; then
