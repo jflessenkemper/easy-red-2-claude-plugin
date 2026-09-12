@@ -4,6 +4,33 @@ All notable changes to the **easy-red-2** Claude Code plugin.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0]
+
+### Added
+- **`tools/visual_probe.py`** — `shot` / `look` / `orbit` / `ascend` / `contrast`. The `contrast`
+  gate scores luminance and unique-colour fraction and **exits 1 on a visually empty frame**;
+  several verification attempts had been wasted on captures that turned out to be featureless sand.
+- **`tools/virtual_pad.py`** — a stdlib-only uinput Xbox-style gamepad, with a safety interlock
+  that REFUSES to create the device while a Steam game other than Easy Red 2 is running. A virtual
+  pad is globally visible and would disturb whatever the user is playing.
+- **`skills/visual-test/`** — the procedure for visually proving mod behaviour, and the measured
+  record of which input paths reach ER2's camera.
+- **MCP tools `er2_button`, `er2_move_rel`, `er2_look`, `er2_drag`** — the harness had implemented
+  `BUTTON` and `DRAG` all along without exposing them; `MOVE_REL` / `LOOK` are new.
+
+### Changed
+- **`tools/fix_steam_launch_options.py` now passes `--force-grab-cursor`.** Without it the
+  compositor flips between absolute and relative mouse mode on cursor visibility and settles on
+  absolute.
+
+### Notes
+- ER2's Free Camera **cannot be aimed** by this harness. Absolute warps, true relative motion,
+  relative-with-button-held, `--force-grab-cursor` and a uinput gamepad (created both before and
+  after game launch) were all measured as having no effect. Only `E`/`Q` altitude responds.
+- What DOES work for touring the map: the squad-follow spectator plus **LEFT/RIGHT arrows to cycle
+  squads**, **SPACE** for the squad role list, and clicking a role to **deploy first-person**,
+  after which **`M`** opens the tactical map.
+
 ## [1.6.0]
 
 ### Added

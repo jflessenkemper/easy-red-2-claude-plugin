@@ -42,7 +42,13 @@ HARNESS_CANDIDATES = [
 # like "harness not running". $HOME is shared by every party involved.
 SOCKET = os.path.join(HOME, ".er2harness.sock")
 
+# --force-grab-cursor is load-bearing for visual testing: without it the compositor
+# flips between absolute and relative mouse mode depending on cursor visibility, and
+# settles on absolute -- so ER2's Free Camera look-around receives no motion at all and
+# LOOK/MOVE_REL are silently swallowed. Three drag attempts and three button-held LOOK
+# sweeps produced pixel-identical frames before this was diagnosed. Do not drop it.
 FLAGS = ("--keep-alive -W 1920 -H 1080 -w 1920 -h 1080 -r 30 --framerate-limit 30 "
+         "--force-grab-cursor "
          "--backend headless --xwayland-count 1 --harness-socket %s" % SOCKET)
 
 

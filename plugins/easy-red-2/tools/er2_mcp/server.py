@@ -12,6 +12,10 @@ Tools
   er2_state       harness STATE (ready / inner_alive) — gate every action on this
   er2_screenshot  current frame, returned INLINE as an image
   er2_click       click at x,y (optional reliable double-tap recipe)
+  er2_button      hold/release a mouse button in place (press and release, unfused)
+  er2_move_rel    move the pointer by a RELATIVE delta — the only thing Free Camera reacts to
+  er2_look        sweep the view by (dx,dy) as N relative motions, optionally button-held
+  er2_drag        drag between two ABSOLUTE points (UI sliders/gizmos, NOT the camera)
   er2_key         key tap by name ("space","f3","p","escape","enter") or Win32 VK int
   er2_type        type a string (for the in-game F3 Lua console)
   er2_lua         run a Lua snippet via the F3 console (open, type, enter, close)
@@ -560,6 +564,54 @@ def t_click(args):
     return [text("; ".join(hsend(cmds)))]
 
 
+def t_button(args):
+    """Hold or release a mouse button without moving the pointer. Splitting the press from
+    the release is what makes a held-button free-look possible at all — CLICK fuses both."""
+    require_live()
+    action = str(args.get("action", "down")).strip().upper()
+    if action not in ("DOWN", "UP"):
+        return [text("unknown action %r (use 'down' or 'up')" % args.get("action"))]
+    button = int(args.get("button", 1))
+    return [text(hsend(["BUTTON %s %d" % (action, button)])[0])]
+
+
+def t_move_rel(args):
+    """Move the pointer by a RELATIVE delta. ER2's Free Camera reads relative motion only —
+    an absolute MOVE warp produces a pixel-identical frame, so use this to look around."""
+    require_live()
+    dx, dy = float(args["dx"]), float(args["dy"])
+    return [text(hsend(["MOVE_REL %g %g" % (dx, dy)])[0])]
+
+
+def t_look(args):
+    """Sweep the view by (dx, dy), split into `steps` relative motions so the game samples the
+    motion over several frames instead of one impossible jump. Pass `button` to hold that mouse
+    button down for the whole sweep (the drag-look idiom) — press, sweep and release go out as a
+    single hsend batch so another client cannot interleave a command between them."""
+    require_live()
+    dx, dy = float(args["dx"]), float(args["dy"])
+    steps = int(args.get("steps", 20))
+    delay_ms = int(args.get("delay_ms", 8))
+    look = "LOOK %g %g %d %d" % (dx, dy, steps, delay_ms)
+    button = args.get("button")
+    if button is None:
+        cmds = [look]
+    else:
+        b = int(button)
+        cmds = ["BUTTON DOWN %d" % b, look, "BUTTON UP %d" % b]
+    return [text("; ".join(hsend(cmds)))]
+
+
+def t_drag(args):
+    """Drag from (x1,y1) to (x2,y2) with a button held. ABSOLUTE positions — fine for UI
+    sliders and editor gizmos, but it does NOT drive the Free Camera; use er2_look for that."""
+    require_live()
+    x1, y1 = int(args["x1"]), int(args["y1"])
+    x2, y2 = int(args["x2"]), int(args["y2"])
+    button = int(args.get("button", 1))
+    return [text(hsend(["DRAG %d %d %d %d %d" % (x1, y1, x2, y2, button)])[0])]
+
+
 def _vk_of(key):
     if isinstance(key, int):
         return key
@@ -1068,6 +1120,50 @@ TOOLS = {
             "button": {"type": "integer", "description": "1=left (default), 3=right"},
             "reliable": {"type": "boolean", "description": "double-tap recipe for menu buttons"}},
             "required": ["x", "y"]},
+    },
+    "er2_button": {
+        "fn": t_button,
+        "description": "Press or release a mouse button in place, without moving the pointer. "
+                       "Use with er2_move_rel when you need a held-button gesture that er2_look "
+                       "does not cover; er2_click fuses press+release and cannot hold.",
+        "schema": {"type": "object", "properties": {
+            "action": {"type": "string", "description": "'down' (default) or 'up'"},
+            "button": {"type": "integer", "description": "1=left (default), 2=middle, 3=right"}}},
+    },
+    "er2_move_rel": {
+        "fn": t_move_rel,
+        "description": "Move the pointer by a RELATIVE delta (dx, dy) instead of warping it to an "
+                       "absolute point. REQUIRED for looking around in Free Camera: ER2 reads raw "
+                       "relative motion, so an absolute MOVE/DRAG leaves the view pixel-identical.",
+        "schema": {"type": "object", "properties": {
+            "dx": {"type": "number"}, "dy": {"type": "number"}},
+            "required": ["dx", "dy"]},
+    },
+    "er2_look": {
+        "fn": t_look,
+        "description": "Sweep the Free Camera view by (dx, dy), emitted as `steps` successive "
+                       "relative motions. THIS IS HOW YOU LOOK AROUND — absolute pointer warps do "
+                       "not turn the camera. Roughly 10 units of dx per degree of yaw at default "
+                       "sensitivity; positive dy looks down. Pass button=1 to hold left while "
+                       "sweeping (press/sweep/release are sent as one atomic batch).",
+        "schema": {"type": "object", "properties": {
+            "dx": {"type": "number", "description": "horizontal sweep (yaw), + = right"},
+            "dy": {"type": "number", "description": "vertical sweep (pitch), + = down"},
+            "steps": {"type": "integer", "description": "motions to split the sweep into (default 20)"},
+            "delay_ms": {"type": "integer", "description": "ms between motions (default 8)"},
+            "button": {"type": "integer", "description": "hold this button for the sweep (omit for none)"}},
+            "required": ["dx", "dy"]},
+    },
+    "er2_drag": {
+        "fn": t_drag,
+        "description": "Drag between two ABSOLUTE screen points with a button held — for UI "
+                       "sliders and mission-editor gizmos. Does NOT rotate the Free Camera: use "
+                       "er2_look for that.",
+        "schema": {"type": "object", "properties": {
+            "x1": {"type": "integer"}, "y1": {"type": "integer"},
+            "x2": {"type": "integer"}, "y2": {"type": "integer"},
+            "button": {"type": "integer", "description": "1=left (default), 2=middle, 3=right"}},
+            "required": ["x1", "y1", "x2", "y2"]},
     },
     "er2_key": {
         "fn": t_key,

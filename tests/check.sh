@@ -14,7 +14,7 @@ ok()  { printf '  \033[32mPASS\033[0m  %s\n' "$1"; PASS=$((PASS+1)); }
 bad() { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; FAIL=$((FAIL+1)); }
 
 SERVER=plugins/easy-red-2/tools/er2_mcp/server.py
-PY_FILES="$SERVER tools/analyse_run.py tools/fix_steam_launch_options.py"
+PY_FILES="$SERVER plugins/easy-red-2/tools/visual_probe.py tools/analyse_run.py tools/fix_steam_launch_options.py"
 
 echo "== 1. Python syntax =="
 for f in $PY_FILES; do
