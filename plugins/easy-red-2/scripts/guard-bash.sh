@@ -46,6 +46,38 @@ and wait; never escalate." >&2
     exit 2
 fi
 
+# --- Rule 1b: never shut Steam down while somebody else's game is running ------------------------
+# `steam -shutdown` is GRACEFUL, so Rule 1 above does not catch it -- and Rule 1's own message
+# actively recommends it. But it still closes every running Steam game. On 2026-09-13 this killed
+# the user's Bannerlord mid-session: the operator ran the foreign-AppId check, PRINTED the result,
+# and then shut Steam down anyway without gating on it. The user had already asked twice not to
+# have their games closed. A check whose result is advisory is not a check.
+if printf '%s' "$cmd" | grep -qiE 'steam([.]sh)?[[:space:]]+(-{1,2})shutdown'; then
+    # Test seam: the gate must be able to prove it blocks without a real game running.
+    # NOTE the ${VAR+set} form, NOT ${VAR:-}. An EMPTY value is a meaningful case here
+    # ("no games running"), and ${VAR:-} cannot tell empty from unset -- that exact
+    # confusion made the first version of this gate block the allow cases.
+    if [ -n "${ER2_FAKE_APPIDS+set}" ]; then
+        raw=$(printf '%s' "$ER2_FAKE_APPIDS" | tr ',' '\n')
+    else
+        raw=$(for p in /proc/[0-9]*; do
+            [ "${p#/proc/}" = "$$" ] && continue
+            tr '\0' ' ' < "$p/cmdline" 2>/dev/null \
+                | grep -oE 'SteamLaunch AppId=[0-9]+' | grep -oE '[0-9]+$'
+        done 2>/dev/null)
+    fi
+    # Easy Red 2 itself never counts: closing it is part of the normal workflow.
+    foreign=$(printf '%s' "$raw" | grep -E '^[0-9]+$' | sort -u | grep -v '^1324780$' | tr '\n' ' ')
+    if [ -n "$(printf '%s' "$foreign" | tr -d '[:space:]')" ]; then
+        echo "BLOCKED: Steam game(s) running with AppId $foreign. 'steam -shutdown' is graceful but \
+still closes EVERY running Steam game. This killed the user's Bannerlord on 2026-09-13 and their \
+Hell Let Loose session was nearly lost the same way; they have asked more than once not to have \
+games closed. WAIT until they finish, or ask. Easy Red 2 (1324780) does not count - closing that \
+one is part of the normal launch-option workflow." >&2
+        exit 2
+    fi
+fi
+
 # --- Rule 2: never mute the default sink, and never sweep all sink-inputs ------------------------
 if printf '%s' "$cmd" | grep -qE 'pactl[^|;&]*set-sink-mute[^|;&]*@DEFAULT_SINK@'; then
     echo "BLOCKED: do not mute @DEFAULT_SINK@. Doing this once silenced the user's other game AND \

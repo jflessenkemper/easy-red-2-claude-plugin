@@ -205,30 +205,50 @@ else:
         "for i in $(pactl list short sink-inputs | cut -f1); do pactl set-sink-input-mute $i 1; done",
     ]
     MUST_ALLOW = [
-        "steam -shutdown",
         "pkill -9 -x AOE3DEHarness",
         "pactl move-sink-input 2250 er2_silence",
         "pactl list short sinks",
         "pidof steam",
     ]
-    def rc(cmd):
+
+    # `steam -shutdown` is CONDITIONAL: graceful, but it closes every running Steam
+    # game. It killed the user's Bannerlord on 2026-09-13. ER2_FAKE_APPIDS pins the
+    # "what is running" scan so these cases are deterministic instead of depending on
+    # whatever the developer happens to be playing.
+    CONDITIONAL = [
+        ("/x/steam.sh -shutdown", "261550", 2, "a foreign game is running"),
+        ("steam --shutdown", "261550,933110", 2, "two foreign games are running"),
+        ("steam -shutdown", "1324780", 0, "only Easy Red 2 is running"),
+        ("steam -shutdown", "", 0, "no game is running"),
+    ]
+
+    def rc(cmd, fake=None):
+        env = dict(os.environ)
+        if fake is not None:
+            env["ER2_FAKE_APPIDS"] = fake
+        else:
+            env.pop("ER2_FAKE_APPIDS", None)
         r = subprocess.run([guard], input=json.dumps({"tool_input": {"command": cmd}}),
-                           capture_output=True, text=True, timeout=30)
+                           capture_output=True, text=True, timeout=30, env=env)
         return r.returncode
     for c in MUST_BLOCK:
-        got = rc(c)
+        got = rc(c, "")          # pin: no game running, so only Rule 1 can fire
         if got != 2:
             fail.append("guard ALLOWED a dangerous command (rc=%d, expected 2): %s" % (got, c))
     for c in MUST_ALLOW:
-        got = rc(c)
+        got = rc(c, "")
         if got != 0:
             fail.append("guard BLOCKED a legitimate command (rc=%d, expected 0): %s" % (got, c))
+    for cmd, fake, want, why in CONDITIONAL:
+        got = rc(cmd, fake)
+        if got != want:
+            fail.append("guard rc=%d, expected %d, when %s: %s" % (got, want, why, cmd))
 
 if fail:
     for f in fail:
         print("FAIL  " + f)
     sys.exit(1)
-print("ok    guard hooks block 6 dangerous forms and allow 5 legitimate lookalikes")
+print("ok    guard hooks block 6 dangerous forms, allow 4 lookalikes, and gate steam -shutdown on 4 running-game cases")
 PY2
 if [ $? -eq 0 ]; then ok "guard hooks enforce the operational rules"; else bad "guard hooks do not enforce what they claim"; fi
 
