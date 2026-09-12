@@ -26,11 +26,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `BUTTON` and `DRAG` all along without exposing them; `MOVE_REL` / `LOOK` are new.
 
 ### Changed
+- **`record.py --region X,Y,W,H` raises the capture rate ~15x** (0.9 -> 14.0 fps measured).
+  Capture cost is proportional to PIXEL AREA: full 1920x1080 ~660 ms, a 640x360 region ~69 ms
+  (9.0x fewer pixels, 9.6x faster). The bottleneck is per-pixel readback, not the socket
+  round-trip and not the encoder -- PNG measured FASTER than JPEG. Region capture is always PNG
+  because the harness rejects any other extension.
+- **Harness now runs at `-r 60 --framerate-limit 60`** (was 30), so the source is smoother.
 - **`tools/fix_steam_launch_options.py` now passes `--force-grab-cursor`.** Without it the
   compositor flips between absolute and relative mouse mode on cursor visibility and settles on
   absolute.
 
 ### Notes
+- **x11grab does not work** for this game. It renders through gamescope's compositor, so the
+  nested Xwayland root window is solid black (verified: mean 0.0 -- the empty-frame gate caught
+  it). The compositor screenshot path is the only real pixel source. Beware `DISPLAY=:0` in the
+  game's environment: that is the USER'S OWN desktop, inherited from the host, not the harness.
 - ER2's Free Camera **cannot be aimed** by this harness. Absolute warps, true relative motion,
   relative-with-button-held, `--force-grab-cursor` and a uinput gamepad (created both before and
   after game launch) were all measured as having no effect. Only `E`/`Q` altitude responds.

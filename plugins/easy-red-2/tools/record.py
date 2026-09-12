@@ -8,9 +8,25 @@ reset, a medic crossing to a casualty, a squad bounding. A clip captures the
 motion; the contact sheet is how an AGENT reads that motion, since a model can
 look at one tiled image but cannot watch an mp4.
 
-Frames come from the harness `SCREENSHOT_BYTES` verb, which returns the encoded
-image inline over the control socket -- no disk round-trip per frame, so the
-achievable rate is several times higher than repeated `SCREENSHOT <path>`.
+Frame rate
+----------
+Capture cost is proportional to PIXEL AREA, measured 2026-09-13:
+
+    full frame 1920x1080   ~660 ms   ->  1.5 fps
+    region       640x360    ~69 ms   -> 14   fps
+    PIXEL                     5 ms
+    STATE                    ~0 ms
+
+So the bottleneck is per-pixel readback -- not the socket round-trip, and not the
+encoder (PNG measured FASTER than JPEG). `--region X,Y,W,H` is therefore the main
+lever for smooth video without relaunching the harness smaller. NOTE the harness
+demands a .png path for regions, so region capture is always PNG.
+
+x11grab on the nested Xwayland does NOT work: the game renders through gamescope's
+compositor, so the X root window is solid black (verified -- mean 0.0). The
+compositor screenshot path is the only real pixel source. Also beware DISPLAY=:0
+in the game's environment: that is the USER'S OWN 2560x1440 desktop, inherited
+from the host. Capturing it would record their screen.
 
 Usage
   record.py clip --seconds 45 --fps 4 --name reset
@@ -43,8 +59,29 @@ def read_line(f):
     return f.readline().decode("utf-8", "replace").strip()
 
 
-def grab(f, fmt="jpg"):
-    """One frame. Returns raw encoded bytes, or None if the harness refused."""
+def grab(f, fmt="jpg", region=None):
+    """One frame. Returns raw encoded bytes, or None if the harness refused.
+
+    Capture cost is almost PURELY proportional to pixel area -- measured on
+    2026-09-13: a full 1920x1080 frame takes ~660 ms, a 640x360 region ~69 ms
+    (9.0x fewer pixels, 9.6x faster), while PIXEL is 5 ms and STATE ~0 ms. So the
+    bottleneck is per-pixel readback, not the socket round-trip and not the
+    encoder (PNG actually measured FASTER than JPEG). Cropping to the action is
+    the only way to raise the frame rate without relaunching the harness at a
+    lower internal resolution.
+    """
+    if region:
+        x, y, w, h = region
+        path = os.path.join(OUT, "_regionframe.%s" % fmt)
+        f.write(("SCREENSHOT_REGION %d %d %d %d %s\n" % (x, y, w, h, path)).encode())
+        f.flush()
+        if not read_line(f).startswith("OK"):
+            return None
+        try:
+            with open(path, "rb") as fh:
+                return fh.read()
+        except IOError:
+            return None
     f.write(("SCREENSHOT_BYTES %s\n" % fmt).encode())
     f.flush()
     head = read_line(f)
@@ -98,12 +135,24 @@ def cmd_clip(args):
             return 2
         print("trigger: %s" % line)
 
+    region = None
+    if args.region:
+        # SCREENSHOT_REGION only accepts a .png path (ERR INVALID_REGION
+        # must_have_png_extension), so region capture is PNG regardless of --fmt.
+        args.fmt = "png"
+        try:
+            region = tuple(int(v) for v in args.region.split(","))
+            assert len(region) == 4
+        except (ValueError, AssertionError):
+            print("bad --region, want X,Y,W,H", file=sys.stderr)
+            return 2
+
     s = connect()
     f = s.makefile("rwb")
     period = 1.0 / args.fps
     n, t0, nxt = 0, time.time(), time.time()
     while time.time() - t0 < args.seconds:
-        raw = grab(f, args.fmt)
+        raw = grab(f, args.fmt, region)
         if raw:
             with open(os.path.join(d, "f%04d.%s" % (n, args.fmt)), "wb") as fh:
                 fh.write(raw)
@@ -184,6 +233,10 @@ def main():
     c.add_argument("--name", default="clip")
     c.add_argument("--cols", type=int, default=6)
     c.add_argument("--fmt", choices=["jpg", "png"], default="jpg")
+    c.add_argument("--region", metavar="X,Y,W,H",
+                   help="capture only this rectangle. Frame cost is proportional to "
+                        "pixel AREA, so cropping is the main way to raise the frame "
+                        "rate: full 1920x1080 ~660ms (1.5 fps), 640x360 ~69ms (14 fps).")
     c.add_argument("--wait-log", help="regex; start only when a NEW matching log line appears")
     c.add_argument("--wait-timeout", type=float, default=180.0)
     c.set_defaults(fn=cmd_clip)
