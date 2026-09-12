@@ -7,6 +7,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [1.7.0]
 
 ### Added
+- **`tools/record.py`** — records the game to BOTH an mp4 and a labelled contact sheet. Stills
+  sampled seconds apart miss anything temporal (a 45s diorama reset, a medic crossing to a
+  casualty); the clip captures the motion and the sheet is how an agent READS that motion, since a
+  model can look at one tiled image but cannot watch a video. Frames come from `SCREENSHOT_BYTES`
+  (inline over the socket, no per-frame disk round-trip); `--wait-log REGEX` starts the capture on
+  a new matching log line rather than on a guessed delay. Measured capture rate is ~0.9 fps at
+  1920x1080 headless.
 - **`tools/visual_probe.py`** — `shot` / `look` / `orbit` / `ascend` / `contrast`. The `contrast`
   gate scores luminance and unique-colour fraction and **exits 1 on a visually empty frame**;
   several verification attempts had been wasted on captures that turned out to be featureless sand.
