@@ -4,6 +4,23 @@ All notable changes to the **easy-red-2** Claude Code plugin.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0]
+
+### Fixed
+- **`play_mission` silently failed at any resolution other than 1920×1080, and misreported the
+  cause.** Every click coordinate in it was derived by hand against the 1920×1080 UI. Run at
+  1280×720 the navigation never left the MAIN MENU, and the tool blamed *"the mission panel was
+  probably not open"* — sending you after a UI bug that does not exist. A wrong-but-plausible
+  error message is worse than no message. It now reads `internal_w`/`internal_h` from the harness
+  and refuses, naming the actual size, with `force_resolution: true` as the escape hatch.
+
+  It refuses rather than scaling on purpose: ER2's layout is not uniformly proportional (some
+  chrome is fixed-size), so a scale factor is a guess that would fail quietly in a *different*
+  way — exactly the failure mode this evidence-driven tool exists to eliminate.
+- **check 21** covers it in both directions — guard removed (must refuse and must not click) and
+  guard too strict (must not block the calibrated size). A one-sided test would have been
+  satisfied by refusing everything.
+
 ## [1.10.0]
 
 ### Added

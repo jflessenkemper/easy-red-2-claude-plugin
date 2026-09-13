@@ -619,6 +619,68 @@ print("ok    t_launch refuses while a foreign Steam game is running, and names i
 PY10
 if [ $? -eq 0 ]; then ok "t_launch refuses during someone else's game"; else bad "t_launch does not refuse"; fi
 
+echo "== 21. play_mission refuses at a resolution its coordinates are not calibrated for =="
+# Every click coordinate in play_mission was derived by hand against the 1920x1080 UI. At 1280x720
+# the navigation never left the MAIN MENU, and the tool blamed "the mission panel was probably not
+# open" - sending you after a UI bug that does not exist. A wrong-but-plausible error message is
+# worse than no message.
+python3 - <<'PY11'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("er2srv2", "plugins/easy-red-2/tools/er2_mcp/server.py")
+m = importlib.util.module_from_spec(spec)
+try:
+    spec.loader.exec_module(m)
+except SystemExit:
+    pass
+
+m.require_live = lambda: None
+
+
+class _Clicked(Exception):
+    """Raised by the stubbed click so the test never drives a real game.
+
+    For a REFUSED size this means the guard leaked. For the CALIBRATED size it is
+    the proof the guard let the run proceed, which is what should happen.
+    """
+
+
+m._click = lambda *a, **k: (_ for _ in ()).throw(_Clicked())
+
+fail = []
+for (w, h), expect_refuse in (((1280, 720), True), ((2560, 1440), True), ((1920, 1080), False)):
+    m.hsend = (lambda w_, h_: (lambda cmds, timeout=10.0:
+        ["OK pid=1 internal_w=%d internal_h=%d ready=1 inner_alive=1" % (w_, h_)]))(w, h)
+    clicked = False
+    blob = ""
+    try:
+        out = m.t_play_mission({"name": "x"})
+        blob = " ".join(b.get("text", "") for b in out if isinstance(b, dict))
+    except _Clicked:
+        clicked = True
+    except Exception:
+        pass               # stubbed harness; anything past the guard is fine for this check
+    refused = "REFUSING" in blob
+    if refused != expect_refuse:
+        fail.append("at %dx%d refused=%s, expected %s" % (w, h, refused, expect_refuse))
+    if expect_refuse:
+        if clicked:
+            fail.append("at %dx%d play_mission CLICKED despite refusing-size; the guard leaked"
+                        % (w, h))
+        if refused and ("%dx%d" % (w, h)) not in blob:
+            fail.append("the refusal at %dx%d does not name the actual size" % (w, h))
+    else:
+        if not clicked:
+            fail.append("at %dx%d play_mission never reached the click path; the guard is too "
+                        "strict and blocks the calibrated size" % (w, h))
+
+if fail:
+    for f in fail:
+        print("FAIL  " + f)
+    sys.exit(1)
+print("ok    play_mission refuses off-calibration resolutions and names the size")
+PY11
+if [ $? -eq 0 ]; then ok "play_mission guards its calibration"; else bad "play_mission does not guard its calibration"; fi
+
 echo
 echo "-------------------------------------------"
 printf 'PASS %d   FAIL %d\n' "$PASS" "$FAIL"

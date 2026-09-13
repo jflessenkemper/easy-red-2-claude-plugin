@@ -873,6 +873,29 @@ def t_play_mission(args):
     goes into a loading screen.
     """
     require_live()
+
+    # EVERY coordinate below is calibrated for 1920x1080. At any other size the clicks land on
+    # nothing and the run dies several steps later with "the mission panel was probably not open",
+    # which sends you hunting a UI bug that does not exist. Observed on 2026-09-13 at 1280x720:
+    # the navigation never left the MAIN MENU, and the reported cause was wrong.
+    #
+    # Refusing, rather than scaling: the coordinates were derived by hand against the real UI, and
+    # ER2's layout is not uniformly proportional (some chrome is fixed-size). A scale factor is a
+    # guess that would fail quietly in a different way, which is the failure mode this tool exists
+    # to eliminate. Relaunching at the calibrated size is cheap and certain.
+    try:
+        st = parse_state(hsend(["STATE"])[0])
+        w, h = int(st.get("internal_w", 0)), int(st.get("internal_h", 0))
+    except (HarnessError, ValueError):
+        w = h = 0
+    if (w, h) != (1920, 1080) and not args.get("force_resolution"):
+        return [text(
+            "REFUSING: the harness is running at %dx%d, but every click coordinate in this tool is "
+            "calibrated for 1920x1080. At another size the clicks miss and the failure is reported "
+            "several steps later as 'the mission panel was probably not open', which is misleading.\n"
+            "Relaunch at the calibrated size:  er2_launch {\"width\": 1920, \"height\": 1080}\n"
+            "Pass force_resolution:true to try anyway." % (w, h))]
+
     row = int(args.get("map_row", 1))
     steps = []
 
