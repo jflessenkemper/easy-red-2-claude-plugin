@@ -86,7 +86,12 @@ fi
 # leaving a Vulkan-layer input grab that survived killing gameoverlayui. They had to restart.
 # Steam mode is no better: it needs launch options, which needs Steam shut down, which closes
 # their game. There is no safe mode; the only safe action is to wait.
-if printf '%s' "$cmd" | grep -qiE '(er2(_| )launch|bin/er2[[:space:]]+launch)'; then
+# The TOOL has a documented `force: true` escape hatch for when the user has explicitly said it is
+# fine right now. Without honouring it here, that hatch is unusable from the shell and the only way
+# past an authorised block is to bypass the guard entirely — which is how guards get disabled
+# wholesale. Blocking accidents is the job; blocking an explicit, informed instruction is not.
+if printf '%s' "$cmd" | grep -qiE '(er2(_| )launch|bin/er2[[:space:]]+launch)' \
+   && ! printf '%s' "$cmd" | grep -qiE '"force"[[:space:]]*:[[:space:]]*true'; then
     foreign=$(for p in /proc/[0-9]*; do
         [ "${p#/proc/}" = "$$" ] && continue
         tr '\0' ' ' < "$p/cmdline" 2>/dev/null \

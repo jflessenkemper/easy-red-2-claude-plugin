@@ -469,6 +469,26 @@ def t_launch(args):
     env.update({
         "XDG_RUNTIME_DIR": env.get("XDG_RUNTIME_DIR", "/run/user/1000"),
         "SteamAppId": APPID, "SteamGameId": APPID,
+        # SUPPRESS THE STEAM OVERLAY for this process. The overlay is SHARED
+        # process-wide, and on 2026-09-13 an unentitled launch made Steam push a DLC
+        # store page through it -- which rendered over the user's FOREGROUND game
+        # (an Ironman Bannerlord save) and left a Vulkan-layer input grab that
+        # survived killing gameoverlayui. The game had to be restarted.
+        #
+        # We never need the overlay: this process is driven headlessly and nobody
+        # looks at it. SteamNoOverlayUIDrawing is Steam's own opt-out;
+        # ENABLE_VK_LAYER_VALVE_steam_overlay_1=0 keeps the Vulkan layer itself out
+        # of the instance, which is where the input grab lives.
+        #
+        # THESE ARE NOT SUFFICIENT, and must not be mistaken for a fix. Tested
+        # 2026-09-13 with both set: a direct launch alongside a running Bannerlord
+        # STILL spawned a fresh `gameoverlayui -gameid 261550` 28 seconds later. The
+        # store page is opened by the STEAM CLIENT reacting to an unentitled launch
+        # and drawn in whichever game is in the FOREGROUND — suppressing ER2's own
+        # overlay cannot prevent it. They reduce ER2's own footprint, nothing more.
+        # The only safe condition remains: no other Steam game running.
+        "SteamNoOverlayUIDrawing": "1",
+        "ENABLE_VK_LAYER_VALVE_steam_overlay_1": "0",
     })
     # Audio isolation (default ON): route the headless game to a null sink so it can NEVER
     # reach the speakers. Muting the sink-input by index is unreliable — FMOD recreates its
