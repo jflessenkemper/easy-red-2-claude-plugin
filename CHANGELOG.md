@@ -4,6 +4,29 @@ All notable changes to the **easy-red-2** Claude Code plugin.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0]
+
+### Added
+- **`bin/er2` — a shipped command-line front end.** `bin/` goes on PATH when the plugin is
+  installed. This work had been happening through an **unversioned shim in a scratchpad
+  directory**, which is exactly how a second, subtly-wrong copy of "launch the game" gets born.
+  It calls the same `t_*` functions the MCP tools call, so there is one implementation. Accepts
+  either a JSON object or `--key value` pairs, prints MCP content blocks as plain text, summarises
+  image blocks instead of dumping base64, and fails with a readable message rather than a
+  traceback when the harness is down.
+- **`visual_probe.py crop`** — crop and magnify a SAVED frame. The harness `SCREENSHOT_REGION`
+  verb grabs a FRESH live frame, so it silently answers a different question when you are
+  inspecting a past capture. Magnifying a saved frame is how the station landmarks were confirmed
+  to be trucks rather than soldier clusters.
+- **check 18** (CLI is executable, lists its tools, errors loudly on an unknown one, `--help`
+  works with no harness) and **check 19** (crop scales a saved frame correctly and refuses an
+  out-of-bounds box).
+
+### Fixed
+- `crop` referenced an undefined `TMP`, which would have raised `NameError` the first time anyone
+  omitted `--out`. The crop test passed regardless because it always supplied one — **check 2
+  caught it**, which is precisely the runtime-name class `py_compile` cannot see.
+
 ## [1.8.0]
 
 ### Added

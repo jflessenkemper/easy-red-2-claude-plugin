@@ -57,10 +57,20 @@ not respond to any of them.
 
 ## Command-line tools
 
+`bin/er2` goes on your PATH when the plugin is installed, and drives the same tool functions the
+MCP interface uses — one implementation, no drifting second copy:
+
+```bash
+er2 --list
+er2 state
+er2 log --tag events --lines 40
+er2 click '{"x": 813, "y": 887, "reliable": true}'
+```
+
 | Script | Purpose |
 |---|---|
 | `tools/record.py` | Video clip + labelled contact sheet. `--region` is the frame-rate lever: capture cost is proportional to pixel AREA (full frame ~660 ms → 1.5 fps; a 640×360 region ~69 ms → 14 fps). `--wait-log REGEX` starts on an event instead of a guess. |
-| `tools/visual_probe.py` | `shot` / `look` / `orbit` / `ascend` / `contrast`. **`contrast` exits 1 on a visually empty frame** — it has caught a black capture that would otherwise have been reported as success. |
+| `tools/visual_probe.py` | `shot` / `look` / `orbit` / `ascend` / `crop` / `contrast`. `crop` works on a SAVED frame — the harness's own region verb grabs a fresh live one, which answers a different question when you are inspecting a past capture. **`contrast` exits 1 on a visually empty frame** — it has caught a black capture that would otherwise have been reported as success. |
 | `tools/virtual_pad.py` | A uinput gamepad. Refuses to create the device while a Steam game other than ER2 is running, because a virtual pad is globally visible and would disturb it. |
 
 ## Architecture

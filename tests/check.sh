@@ -487,6 +487,76 @@ print("ok    MCP handshake works; %d tools listed; serverInfo matches the manife
 PY7
 if [ $? -eq 0 ]; then ok "MCP server speaks the protocol"; else bad "MCP server does not answer the real protocol"; fi
 
+echo "== 18. The shipped CLI works and is executable =="
+# bin/ goes on PATH when the plugin is installed, so a non-executable file or a broken import is
+# a silent dead end. This existed for weeks as an UNVERSIONED shim in a scratchpad directory,
+# drifting from the server it wrapped; the point of shipping it is that it is now testable.
+python3 - <<'PY8'
+import os, subprocess, sys
+cli = "plugins/easy-red-2/bin/er2"
+fail = []
+if not os.path.exists(cli):
+    print("FAIL  %s is missing" % cli); sys.exit(1)
+if not os.access(cli, os.X_OK):
+    fail.append("%s is not executable; bin/ entries go on PATH and must be runnable" % cli)
+
+r = subprocess.run([cli, "--list"], capture_output=True, text=True, timeout=60)
+names = [l.strip() for l in r.stdout.splitlines() if l.strip()]
+if r.returncode != 0:
+    fail.append("--list exited %d" % r.returncode)
+for required in ("launch", "state", "screenshot", "click", "key", "log"):
+    if required not in names:
+        fail.append("--list does not offer %r" % required)
+
+# an unknown tool must fail LOUDLY, not silently do nothing
+r = subprocess.run([cli, "definitely-not-a-tool"], capture_output=True, text=True, timeout=60)
+if r.returncode == 0:
+    fail.append("an unknown tool name exited 0; it must be a clear error")
+
+# help must not require a running harness
+r = subprocess.run([cli, "--help"], capture_output=True, text=True, timeout=60)
+if r.returncode != 0 or "er2" not in r.stdout:
+    fail.append("--help does not work standalone")
+
+if fail:
+    for f in fail:
+        print("FAIL  " + f)
+    sys.exit(1)
+print("ok    bin/er2 is executable and exposes %d tools" % len(names))
+PY8
+if [ $? -eq 0 ]; then ok "shipped CLI works"; else bad "shipped CLI is broken"; fi
+
+echo "== 19. visual_probe crop works on a saved frame =="
+# crop must operate on the FILE. SCREENSHOT_REGION grabs a fresh live frame, which silently
+# answers a different question than the one asked when you are inspecting a past capture.
+python3 - <<'PY9'
+import os, subprocess, sys, tempfile
+try:
+    from PIL import Image
+except ImportError:
+    print("ok    PIL absent; crop check skipped"); sys.exit(0)
+d = tempfile.mkdtemp()
+src = os.path.join(d, "src.png")
+Image.new("RGB", (400, 300), (10, 120, 200)).save(src)
+out = os.path.join(d, "out.png")
+r = subprocess.run([sys.executable, "plugins/easy-red-2/tools/visual_probe.py", "crop", src,
+                    "--box", "100,50,120,60", "--scale", "3", "--out", out],
+                   capture_output=True, text=True, timeout=60)
+if r.returncode != 0:
+    print("FAIL  crop exited %d: %s" % (r.returncode, r.stderr.strip()[:160])); sys.exit(1)
+got = Image.open(out).size
+if got != (360, 180):
+    print("FAIL  crop produced %r, expected (360, 180)" % (got,)); sys.exit(1)
+# a box outside the image must be refused, not silently clamped to nothing
+r = subprocess.run([sys.executable, "plugins/easy-red-2/tools/visual_probe.py", "crop", src,
+                    "--box", "9999,9999,50,50", "--out", os.path.join(d, "x.png")],
+                   capture_output=True, text=True, timeout=60)
+if r.returncode == 0:
+    print("FAIL  an out-of-bounds crop box exited 0"); sys.exit(1)
+print("ok    crop scales a saved frame correctly and refuses an out-of-bounds box")
+PY9
+if [ $? -eq 0 ]; then ok "visual_probe crop is correct"; else bad "visual_probe crop is wrong"; fi
+
 echo
 echo "-------------------------------------------"
 printf 'PASS %d   FAIL %d\n' "$PASS" "$FAIL"

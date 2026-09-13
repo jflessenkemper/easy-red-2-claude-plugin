@@ -254,6 +254,42 @@ def cmd_ascend(a):
     return 0
 
 
+def cmd_crop(a):
+    """Crop and magnify a SAVED frame.
+
+    The harness `SCREENSHOT_REGION` verb grabs a FRESH live frame, which is
+    useless for inspecting something already captured -- the scene has moved on.
+    This works on the file, which is what you want when a detail on the horizon
+    decides whether a claim is true. Magnifying a saved frame is how the station
+    landmarks were confirmed to be trucks rather than soldier clusters.
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        print("PIL is required for crop", file=sys.stderr)
+        return 2
+    try:
+        x, y, w, h = (int(v) for v in a.box.split(","))
+    except ValueError:
+        print("bad --box, want X,Y,W,H", file=sys.stderr)
+        return 2
+    im = Image.open(a.path).convert("RGB")
+    x, y = max(0, x), max(0, y)
+    w, h = min(w, im.width - x), min(h, im.height - y)
+    if w <= 0 or h <= 0:
+        print("crop box lies outside the %dx%d image" % (im.width, im.height), file=sys.stderr)
+        return 2
+    out = im.crop((x, y, x + w, y + h))
+    if a.scale > 1:
+        out = out.resize((w * a.scale, h * a.scale), Image.NEAREST)
+    dest = a.out or os.path.join(DEFAULT_DIR, "crop.png")
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    out.save(dest)
+    print("wrote %s  %dx%d (from %dx%d at %d,%d x%d)"
+          % (dest, out.width, out.height, im.width, im.height, x, y, a.scale))
+    return 0
+
+
 def cmd_contrast(a):
     st = frame_stats(a.path)
     ok, why = verdict(st)
@@ -295,6 +331,13 @@ def main(argv=None):
     s.add_argument("--steps", type=int, required=True, help="number of E taps")
     s.add_argument("--out", help="output PNG")
     s.set_defaults(fn=cmd_ascend)
+
+    s = sub.add_parser("crop", help="crop+magnify a SAVED frame (not a fresh capture)")
+    s.add_argument("path")
+    s.add_argument("--box", required=True, metavar="X,Y,W,H")
+    s.add_argument("--scale", type=int, default=2)
+    s.add_argument("--out")
+    s.set_defaults(fn=cmd_crop)
 
     s = sub.add_parser("contrast", help="score a captured frame; exit 1 if it is visually empty")
     s.add_argument("path")
