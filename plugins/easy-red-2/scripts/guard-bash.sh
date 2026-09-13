@@ -78,6 +78,32 @@ one is part of the normal launch-option workflow." >&2
     fi
 fi
 
+# --- Rule 1c: never LAUNCH Easy Red 2 while someone else's game is running -----------------------
+# On 2026-09-13 this was done deliberately, reasoning that direct mode (via_steam:false) avoids
+# restarting Steam and is therefore safe alongside another game. It is not. Without DLC
+# entitlement Steam pushes a DLC STORE PAGE through the overlay, the Steam overlay is shared
+# process-wide, and it attached to the user's foreground game -- an IRONMAN Bannerlord save --
+# leaving a Vulkan-layer input grab that survived killing gameoverlayui. They had to restart.
+# Steam mode is no better: it needs launch options, which needs Steam shut down, which closes
+# their game. There is no safe mode; the only safe action is to wait.
+if printf '%s' "$cmd" | grep -qiE '(er2(_| )launch|bin/er2[[:space:]]+launch)'; then
+    foreign=$(for p in /proc/[0-9]*; do
+        [ "${p#/proc/}" = "$$" ] && continue
+        tr '\0' ' ' < "$p/cmdline" 2>/dev/null \
+            | grep -oE 'SteamLaunch AppId=[0-9]+' | grep -oE '[0-9]+$'
+    done 2>/dev/null | sort -u | grep -v '^1324780$' | tr '\n' ' ')
+    [ -n "${ER2_FAKE_APPIDS+set}" ] && foreign=$(printf '%s' "$ER2_FAKE_APPIDS" | tr ',' ' ' \
+        | tr ' ' '\n' | grep -E '^[0-9]+$' | grep -v '^1324780$' | tr '\n' ' ')
+    if [ -n "$(printf '%s' "$foreign" | tr -d '[:space:]')" ]; then
+        echo "BLOCKED: Steam game(s) running with AppId $foreign. Do NOT launch Easy Red 2 now. \
+Direct mode makes Steam push a DLC store page through the SHARED overlay, which attaches to the \
+game they are playing and can leave an input grab that outlives the overlay process - this made \
+an Ironman Bannerlord save unplayable. Steam mode is worse: it needs launch options, which needs \
+Steam closed, which ends their session. WAIT until they are finished, or ask." >&2
+        exit 2
+    fi
+fi
+
 # --- Rule 2: never mute the default sink, and never sweep all sink-inputs ------------------------
 if printf '%s' "$cmd" | grep -qE 'pactl[^|;&]*set-sink-mute[^|;&]*@DEFAULT_SINK@'; then
     echo "BLOCKED: do not mute @DEFAULT_SINK@. Doing this once silenced the user's other game AND \

@@ -4,6 +4,30 @@ All notable changes to the **easy-red-2** Claude Code plugin.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0]
+
+### Added
+- **`er2_launch` now REFUSES while another Steam game is running**, at two layers: the tool itself
+  (`t_launch`) and the `PreToolUse` guard. `force: true` is the documented escape hatch, for when
+  the user has explicitly said it is fine.
+
+  This was learned destructively on 2026-09-13. Launching in `via_steam: false` mode was reasoned
+  to be safe because it avoids restarting Steam — it is not. Without DLC entitlement, Steam pushes
+  a **DLC store page through the overlay**, and the Steam overlay is **shared process-wide**: it
+  attached to the user's foreground game, an **Ironman Bannerlord save**, and left a Vulkan-layer
+  input grab (`ENABLE_VK_LAYER_VALVE_steam_overlay_1`) that survived killing `gameoverlayui`. The
+  game had to be restarted. Steam mode is no better — it needs launch options, which needs Steam
+  shut down, which closes their game outright. **There is no safe mode; only waiting is safe.**
+- **check 20** covers the tool-level refusal, and **check 12** gained six conditional cases so
+  non-launch commands (`er2 state`, `er2 screenshot`) keep working during someone else's game.
+- `running_foreign_appids()` in `server.py`, verified to agree with `virtual_pad`'s scan.
+
+### Fixed
+- **check 20 could launch the game.** It calls `t_launch` for real, so a regressed guard meant
+  running the test suite would start the game — the precise harm under test, and it happened once
+  while verifying the check. The spawn path is now poisoned before the call, so a regression fails
+  loudly instead of launching.
+
 ## [1.9.0]
 
 ### Added

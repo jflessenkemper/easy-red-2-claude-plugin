@@ -355,10 +355,65 @@ def _preflight_steam(args):
     return None
 
 
+def running_foreign_appids():
+    """AppIds of running Steam games that are NOT Easy Red 2.
+
+    Scans /proc rather than using a full-cmdline process matcher, which is
+    unusable here because it matches the calling shell. Excludes this process
+    for the same reason.
+    """
+    found = set()
+    me = str(os.getpid())
+    marker = "SteamLaunch AppId="
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit() or entry == me:
+            continue
+        try:
+            with open("/proc/%s/cmdline" % entry, "rb") as fh:
+                cmd = fh.read().replace(b"\0", b" ").decode("utf-8", "replace")
+        except (IOError, OSError):
+            continue
+        idx = cmd.find(marker)
+        if idx == -1:
+            continue
+        appid = ""
+        for ch in cmd[idx + len(marker):]:
+            if ch.isdigit():
+                appid += ch
+            else:
+                break
+        if appid and appid != APPID:
+            found.add(appid)
+    return sorted(found)
+
+
 def t_launch(args):
     width = int(args.get("width", 1920))
     height = int(args.get("height", 1080))
     fps = int(args.get("fps", 30))
+
+    # REFUSE while someone else's Steam game is running. Learned the hard way on
+    # 2026-09-13: launching ER2 without DLC entitlement made Steam push a DLC
+    # STORE PAGE through the overlay, and the Steam overlay is shared process-wide
+    # -- it attached to the user's foreground game (Bannerlord, on an Ironman save)
+    # and left a Vulkan-layer input grab that survived killing gameoverlayui. The
+    # game was unplayable until it was restarted.
+    #
+    # This is NOT only about via_steam:false. Steam mode needs launch options,
+    # which needs a Steam shutdown, which closes their game outright. Both modes
+    # are unsafe; there is no "careful" way to do this while they are playing.
+    if not args.get("force"):
+        foreign = running_foreign_appids()
+        if foreign:
+            return [text(
+                "REFUSING to launch: Steam game(s) running with AppId %s.\n"
+                "  * direct mode (via_steam:false) makes Steam push a DLC store page through the "
+                "SHARED overlay, which attaches to whatever the user is playing and can leave an "
+                "input grab that outlives the overlay process;\n"
+                "  * Steam mode needs launch options, which needs Steam shut down, which closes "
+                "their game.\n"
+                "Wait until they have finished, or ask. Pass force:true only if the user has "
+                "explicitly said it is fine right now." % ", ".join(foreign))]
     if os.path.exists(SOCK):
         try:
             st = parse_state(hsend(["STATE"])[0])

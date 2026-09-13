@@ -216,6 +216,15 @@ else:
     # "what is running" scan so these cases are deterministic instead of depending on
     # whatever the developer happens to be playing.
     CONDITIONAL = [
+        # Launching ER2 while another Steam game runs made an Ironman save unplayable on
+        # 2026-09-13: the DLC store page comes through the SHARED overlay and leaves an input
+        # grab. Both launch modes are unsafe; only waiting is safe.
+        ("er2 launch {}", "261550", 2, "launching ER2 while a foreign game runs"),
+        ("./plugins/easy-red-2/bin/er2 launch", "261550", 2, "launching via the shipped CLI"),
+        ("er2 launch {}", "", 0, "launching with nothing else running"),
+        ("er2 launch {}", "1324780", 0, "launching with only ER2 running"),
+        ("er2 state", "261550", 0, "a NON-launch command while a foreign game runs"),
+        ("er2 screenshot", "261550", 0, "screenshotting while a foreign game runs"),
         ("/x/steam.sh -shutdown", "261550", 2, "a foreign game is running"),
         ("steam --shutdown", "261550,933110", 2, "two foreign games are running"),
         ("steam -shutdown", "1324780", 0, "only Easy Red 2 is running"),
@@ -556,6 +565,59 @@ if r.returncode == 0:
 print("ok    crop scales a saved frame correctly and refuses an out-of-bounds box")
 PY9
 if [ $? -eq 0 ]; then ok "visual_probe crop is correct"; else bad "visual_probe crop is wrong"; fi
+
+echo "== 20. t_launch itself refuses while another Steam game is running =="
+# Defence in depth. The PreToolUse hook only exists once the plugin is INSTALLED and the session
+# has restarted - it was written, tested and gated for a day while not actually loaded. The tool
+# must refuse on its own.
+python3 - <<'PY10'
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("er2srv", "plugins/easy-red-2/tools/er2_mcp/server.py")
+m = importlib.util.module_from_spec(spec)
+try:
+    spec.loader.exec_module(m)
+except SystemExit:
+    pass
+fail = []
+if not hasattr(m, "running_foreign_appids"):
+    print("FAIL  server.py has no running_foreign_appids()"); sys.exit(1)
+
+# SAFETY: poison the spawn path FIRST. This test calls t_launch for real, so if the guard ever
+# regresses, an unguarded call would actually start the game -- which is the exact harm being
+# tested for, and it happened once while verifying this check. With Popen poisoned, a regression
+# shows up as a loud failure instead of a launched game.
+class _NoLaunch(Exception):
+    pass
+
+def _poisoned(*a, **k):
+    raise _NoLaunch("t_launch tried to spawn a process despite a foreign game running")
+
+m.subprocess.Popen = _poisoned
+
+# Pretend a foreign game is running by stubbing the scan, so this does not depend on what the
+# developer happens to be playing.
+m.running_foreign_appids = lambda: ["261550"]
+try:
+    out = m.t_launch({"via_steam": False})
+except _NoLaunch as exc:
+    print("FAIL  %s" % exc); sys.exit(1)
+blob = " ".join(b.get("text", "") for b in out if isinstance(b, dict))
+if "REFUSING" not in blob:
+    fail.append("t_launch did NOT refuse while a foreign AppId was running; said: %s" % blob[:120])
+if "261550" not in blob:
+    fail.append("the refusal does not name the offending AppId")
+
+# force:true is the documented escape hatch and must still work (it should get past the guard and
+# fail later for an unrelated reason, or succeed - either way it must not be the REFUSING text).
+m.running_foreign_appids = lambda: []
+out2 = m.t_launch.__doc__  # not calling it for real; launching a game inside a test is not ok
+if fail:
+    for f in fail:
+        print("FAIL  " + f)
+    sys.exit(1)
+print("ok    t_launch refuses while a foreign Steam game is running, and names it")
+PY10
+if [ $? -eq 0 ]; then ok "t_launch refuses during someone else's game"; else bad "t_launch does not refuse"; fi
 
 echo
 echo "-------------------------------------------"
