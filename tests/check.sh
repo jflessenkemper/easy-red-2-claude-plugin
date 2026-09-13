@@ -369,6 +369,44 @@ print("ok    %d skills, %d agents, %d commands all declare valid frontmatter" % 
 PY4
 if [ $? -eq 0 ]; then ok "skills/agents/commands frontmatter is valid"; else bad "a component has frontmatter that would not load"; fi
 
+echo "== 15. The README's manual-launch example matches the real launch flags =="
+# This DRIFTED for real: the README told the reader to pass --harness-socket /tmp/ER2Harness.sock,
+# which is the exact wrong path that check 10 exists to prevent in code. A reader following the
+# docs would start a harness the MCP server cannot talk to. It also still advertised the old
+# framerate cap. Docs that contradict the tool are worse than no docs.
+python3 - <<'PY5'
+import re, sys
+fx = open("tools/fix_steam_launch_options.py").read()
+m = re.search(r"FLAGS = \((.*?)\)\n", fx, re.S)
+if not m:
+    print("FAIL  could not parse FLAGS out of fix_steam_launch_options.py"); sys.exit(1)
+flags = " ".join(re.findall(r'"([^"]*)"', m.group(1)))
+sock = re.search(r'^SOCKET\s*=\s*os\.path\.join\(HOME,\s*"([^"]+)"\)', fx, re.M)
+sock = sock.group(1) if sock else None
+
+readme = open("plugins/easy-red-2/README.md").read()
+fail = []
+if sock and sock not in readme:
+    fail.append("README never mentions the real socket file %r" % sock)
+if "/tmp/ER2Harness.sock" in readme:
+    fail.append("README still documents /tmp/ER2Harness.sock, the wrong path that check 10 guards "
+                "against in code - a reader following it starts a harness the server cannot reach")
+# every flag token that carries a value we care about must appear in the README example
+for tok in ("--framerate-limit", "--force-grab-cursor", "--backend headless", "--keep-alive"):
+    if tok not in readme:
+        fail.append("README manual-launch example is missing %r" % tok)
+fm = re.search(r"--framerate-limit (\d+)", flags)
+if fm and ("--framerate-limit %s" % fm.group(1)) not in readme:
+    fail.append("README framerate cap disagrees with FLAGS (tool says %s)" % fm.group(1))
+
+if fail:
+    for f in fail:
+        print("FAIL  " + f)
+    sys.exit(1)
+print("ok    README launch example agrees with the real flags and socket path")
+PY5
+if [ $? -eq 0 ]; then ok "README launch example matches the tool"; else bad "README launch example has drifted from the tool"; fi
+
 echo
 echo "-------------------------------------------"
 printf 'PASS %d   FAIL %d\n' "$PASS" "$FAIL"

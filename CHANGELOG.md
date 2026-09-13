@@ -16,8 +16,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Stop guard now catches leftovers that outlive the session**: a live `ER2 Virtual Pad` on
   `/dev/input/js0`, and stale `--keep-alive` harness processes. Both actually happened; both are
   invisible from inside the conversation.
-- **check 13** exercises that guard (clean / stale-harness / escape hatch / no self-match) and
-  **check 14** validates skill, agent and command frontmatter.
+- **check 13** exercises that guard (clean / stale-harness / escape hatch / no self-match),
+  **check 14** validates skill, agent and command frontmatter, and **check 15** holds the
+  README's manual-launch example against the tool's real flags.
 
 ### Fixed
 - **The Stop guard exited early when no missions were deployed**, skipping the leftover checks
@@ -29,6 +30,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   cmdline, and excluding `$$` does not help because the offender is the PARENT shell. It now
   requires the process NAME to match as well. This is the same self-match trap that makes the
   full-cmdline forms of pgrep/pkill unusable in this project.
+- **The plugin README documented the WRONG harness socket path** (`/tmp/ER2Harness.sock`) in two
+  places — the exact drift that check 10 guards against in code, so a reader following the docs
+  would start a harness the MCP server cannot talk to. It also still advertised the old framerate
+  cap. **check 15** now holds the README's launch example against the real flags, and caught a
+  second stale occurrence immediately after the first was fixed.
 - **`record.py` and `virtual_pad.py` were not in the gate's `PY_FILES`**, so the two newest tools
   had no syntax or undefined-name checking at all.
 - Both skills now declare `name:`, and `playtest` declares `allowed-tools:`.

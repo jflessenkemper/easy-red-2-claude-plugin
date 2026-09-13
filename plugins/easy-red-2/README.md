@@ -40,8 +40,28 @@ After editing plugin files, run `/reload-plugins`.
 | `er2_deploy` | luajit-validate then copy scripts → `scripts/AI/` + `scripts/mission/phase_0.lua` |
 | `er2_missions` | List mission-editor missions and which scripts are deployed |
 
-Plus a skill: **`/easy-red-2:playtest <mission>`** — runs the whole deploy → launch → observe →
-report cycle in the right order, with the gates enforced.
+The input tools `er2_button`, `er2_move_rel`, `er2_look` and `er2_drag` also exist. They are
+correct implementations of relative pointer motion, but see **Gotchas** — ER2's Free Camera does
+not respond to any of them.
+
+## Skills, commands and agents
+
+| | |
+|---|---|
+| `/easy-red-2:playtest <mission>` | deploy → launch → observe → report, with the gates enforced |
+| `/easy-red-2:visual-test <claim>` | prove something on screen, and reject empty frames automatically |
+| `/er2-status` | harness, Steam, leftovers — and whether it is safe to touch Steam right now |
+| `/er2-record <what>` | record an mp4 **and** a contact sheet; supports `--wait-log` triggering |
+| `/er2-restore` | put the machine back to normal, verifying each step |
+| `playtest-runner` agent | long unattended runs, off the main conversation |
+
+## Command-line tools
+
+| Script | Purpose |
+|---|---|
+| `tools/record.py` | Video clip + labelled contact sheet. `--region` is the frame-rate lever: capture cost is proportional to pixel AREA (full frame ~660 ms → 1.5 fps; a 640×360 region ~69 ms → 14 fps). `--wait-log REGEX` starts on an event instead of a guess. |
+| `tools/visual_probe.py` | `shot` / `look` / `orbit` / `ascend` / `contrast`. **`contrast` exits 1 on a visually empty frame** — it has caught a black capture that would otherwise have been reported as success. |
+| `tools/virtual_pad.py` | A uinput gamepad. Refuses to create the device while a Steam game other than ER2 is running, because a virtual pad is globally visible and would disturb it. |
 
 ## Architecture
 
@@ -51,7 +71,7 @@ Claude  ──stdio JSON-RPC──>  tools/er2_mcp/server.py
                     ┌─────────────┴──────────────┐
                     │                            │
           AF_UNIX control socket          filesystem
-          /tmp/ER2Harness.sock            Player.log (telemetry out)
+          ~/.er2harness.sock             Player.log (telemetry out)
                     │                     scripts/AI/*.lua (code in)
         gamescope-fork harness (headless, 1920x1080)
                     │
@@ -67,8 +87,9 @@ Manual launch equivalent of `er2_launch`:
 ```bash
 XDG_RUNTIME_DIR=/run/user/1000 SteamAppId=1324780 SteamGameId=1324780 \
 ~/AOE-3-DE-Harness/build-f44/src/AOE3DEHarness --keep-alive \
-  -W 1920 -H 1080 -w 1920 -h 1080 -r 30 --framerate-limit 30 \
-  --backend headless --xwayland-count 1 --harness-socket /tmp/ER2Harness.sock \
+  -W 1920 -H 1080 -w 1920 -h 1080 -r 60 --framerate-limit 60 \
+  --force-grab-cursor \
+  --backend headless --xwayland-count 1 --harness-socket ~/.er2harness.sock \
   -- "$HOME/.local/share/Steam/steamapps/common/Easy Red 2/Easy Red 2.x86_64"
 ```
 
