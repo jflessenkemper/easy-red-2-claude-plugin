@@ -4,6 +4,16 @@ All notable changes to the **easy-red-2** Claude Code plugin.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0]
+
+### Added
+- **check 22 — every script `hooks.json` points at must exist and be EXECUTABLE.** A hook whose
+  command is not executable does not error; the hook simply never runs and the protection it was
+  written for is silently absent. The existing executable check covered only `bin/er2`. This is the
+  same shape as the failure where the Steam guard was written, unit-tested and described as
+  protection for a full day while the plugin containing it was not installed — nothing should be
+  able to LOOK enforced while being dormant. Verified red by removing the executable bit.
+
 ## [1.11.0]
 
 ### Fixed

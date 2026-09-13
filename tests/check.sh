@@ -681,6 +681,43 @@ print("ok    play_mission refuses off-calibration resolutions and names the size
 PY11
 if [ $? -eq 0 ]; then ok "play_mission guards its calibration"; else bad "play_mission does not guard its calibration"; fi
 
+echo "== 22. Every script hooks.json points at exists and is EXECUTABLE =="
+# A hook whose command is not executable does not error loudly - the hook simply never runs, and
+# the protection it was written for is silently absent. That is not hypothetical: the Steam guard
+# was written, unit-tested and described as protection for a full day while the plugin containing
+# it was not even installed. Nothing should be able to LOOK enforced while being dormant.
+python3 - <<'PY12'
+import json, os, re, sys
+cfg = "plugins/easy-red-2/hooks/hooks.json"
+if not os.path.exists(cfg):
+    print("FAIL  %s is missing" % cfg); sys.exit(1)
+d = json.load(open(cfg))
+root = "plugins/easy-red-2"
+fail, seen = [], 0
+for event, arr in d.get("hooks", {}).items():
+    for entry in arr:
+        for hk in entry.get("hooks", []):
+            cmd = hk.get("command", "")
+            if not cmd:
+                continue
+            seen += 1
+            # resolve ${CLAUDE_PLUGIN_ROOT} to the in-repo plugin dir
+            path = cmd.replace("${CLAUDE_PLUGIN_ROOT}", root).replace('"', "").split()[0]
+            if not os.path.exists(path):
+                fail.append("%s hook points at a missing file: %s" % (event, path))
+            elif not os.access(path, os.X_OK):
+                fail.append("%s hook script is NOT executable, so the hook will silently never "
+                            "run: %s" % (event, path))
+if not seen:
+    fail.append("hooks.json declares no hook commands at all")
+if fail:
+    for f in fail:
+        print("FAIL  " + f)
+    sys.exit(1)
+print("ok    all %d hook commands exist and are executable" % seen)
+PY12
+if [ $? -eq 0 ]; then ok "hook scripts are runnable"; else bad "a hook script would silently never run"; fi
+
 echo
 echo "-------------------------------------------"
 printf 'PASS %d   FAIL %d\n' "$PASS" "$FAIL"
