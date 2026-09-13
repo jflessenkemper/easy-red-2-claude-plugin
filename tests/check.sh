@@ -14,7 +14,7 @@ ok()  { printf '  \033[32mPASS\033[0m  %s\n' "$1"; PASS=$((PASS+1)); }
 bad() { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; FAIL=$((FAIL+1)); }
 
 SERVER=plugins/easy-red-2/tools/er2_mcp/server.py
-PY_FILES="$SERVER plugins/easy-red-2/tools/visual_probe.py tools/analyse_run.py tools/fix_steam_launch_options.py"
+PY_FILES="$SERVER plugins/easy-red-2/tools/visual_probe.py plugins/easy-red-2/tools/record.py plugins/easy-red-2/tools/virtual_pad.py tools/analyse_run.py tools/fix_steam_launch_options.py"
 
 echo "== 1. Python syntax =="
 for f in $PY_FILES; do
@@ -251,6 +251,123 @@ if fail:
 print("ok    guard hooks block 6 dangerous forms, allow 4 lookalikes, and gate steam -shutdown on 4 running-game cases")
 PY2
 if [ $? -eq 0 ]; then ok "guard hooks enforce the operational rules"; else bad "guard hooks do not enforce what they claim"; fi
+
+echo "== 13. The Stop guard catches leftovers that outlive the session =="
+# Both of these actually happened. A virtual gamepad left at /dev/input/js0 is visible to EVERY
+# application and can change how the user's next game reads input. Stale --keep-alive harness
+# processes ignore SIGTERM and make Steam refuse the next launch, which surfaces as a confusing
+# "harness socket not found" timeout rather than as the leftover it is.
+python3 - <<'PY3'
+import os, subprocess, sys, tempfile, time
+guard = "plugins/easy-red-2/scripts/guard-stop.sh"
+fail = []
+env0 = dict(os.environ)
+env0["ER2_SKIP_PAD_CHECK"] = "1"
+env0["ER2_CFG_DIR"] = tempfile.mkdtemp()      # no deployed builds to police
+
+def rc(env):
+    return subprocess.run(["bash", guard], capture_output=True, text=True,
+                          timeout=60, env=env).returncode
+
+# baseline: nothing left over
+if rc(env0) != 0:
+    fail.append("Stop guard blocks a clean session (expected 0)")
+
+# a decoy shaped like a real stale harness: right process NAME and right cmdline
+d = tempfile.mkdtemp()
+fake = os.path.join(d, "gamescope-wl")
+open(fake, "w").write("#!/bin/sh\nsleep 20\n")
+os.chmod(fake, 0o755)
+proc = subprocess.Popen([fake, "/x/AOE3DEHarness", "--keep-alive"])
+try:
+    time.sleep(1.0)
+    if rc(env0) != 2:
+        fail.append("Stop guard ALLOWED a stale harness process (expected 2)")
+    env1 = dict(env0); env1["ER2_SKIP_HARNESS_CHECK"] = "1"
+    if rc(env1) != 0:
+        fail.append("ER2_SKIP_HARNESS_CHECK escape hatch does not work")
+finally:
+    proc.kill(); proc.wait(timeout=10)
+
+# self-match regression: merely NAMING the harness must not trip it. Excluding $$ is not enough,
+# because the offender is the PARENT shell -- this is why the guard also matches on comm.
+env2 = dict(env0)
+r = subprocess.run(["bash", "-c", "bash %s # AOE3DEHarness" % guard],
+                   capture_output=True, text=True, timeout=60, env=env2)
+if r.returncode != 0:
+    fail.append("Stop guard self-matches a shell command that merely mentions AOE3DEHarness")
+
+if fail:
+    for f in fail:
+        print("FAIL  " + f)
+    sys.exit(1)
+print("ok    Stop guard: clean=0, stale harness=2, escape hatch=0, no self-match")
+PY3
+if [ $? -eq 0 ]; then ok "Stop guard catches session leftovers"; else bad "Stop guard does not catch leftovers"; fi
+
+echo "== 14. Skills, agents and commands have the frontmatter that makes them load =="
+# A component with broken or missing frontmatter does not error - it silently does not register,
+# so the failure shows up as "why is my skill not there" long after the edit.
+python3 - <<'PY4'
+import glob, os, re, sys
+fail = []
+
+def front(path):
+    t = open(path, encoding="utf-8").read()
+    m = re.match(r"^---\n(.*?)\n---\n", t, re.S)
+    if not m:
+        return None
+    out = {}
+    for line in m.group(1).splitlines():
+        if ":" in line and not line.startswith(" "):
+            k, v = line.split(":", 1)
+            out[k.strip()] = v.strip()
+    return out
+
+for path in sorted(glob.glob("plugins/*/skills/*/SKILL.md")):
+    f = front(path)
+    if f is None:
+        fail.append("%s has no YAML frontmatter block" % path); continue
+    for key in ("name", "description"):
+        if not f.get(key):
+            fail.append("%s is missing `%s:`" % (path, key))
+    # name must be the kebab-case invocation name and match its directory
+    d = os.path.basename(os.path.dirname(path))
+    if f.get("name") and f["name"] != d:
+        fail.append("%s declares name=%r but lives in directory %r; the invocation name should "
+                    "match so it stays stable across installs" % (path, f["name"], d))
+
+for path in sorted(glob.glob("plugins/*/agents/*.md")):
+    f = front(path)
+    if f is None:
+        fail.append("%s has no YAML frontmatter block" % path); continue
+    for key in ("name", "description"):
+        if not f.get(key):
+            fail.append("%s is missing `%s:`" % (path, key))
+    # documented as unsupported for plugin agents, for security reasons
+    for banned in ("hooks", "mcpServers", "permissionMode"):
+        if banned in f:
+            fail.append("%s sets `%s:`, which plugin agents do not support" % (path, banned))
+    if f.get("isolation") and f["isolation"].strip('"\'') != "worktree":
+        fail.append("%s sets isolation=%r; the only valid value is \"worktree\"" % (path, f["isolation"]))
+
+for path in sorted(glob.glob("plugins/*/commands/*.md")):
+    f = front(path)
+    if f is None:
+        fail.append("%s has no YAML frontmatter block" % path); continue
+    if not f.get("description"):
+        fail.append("%s is missing `description:` - it is what the user sees in the picker" % path)
+
+if fail:
+    for f in fail:
+        print("FAIL  " + f)
+    sys.exit(1)
+n_s = len(glob.glob("plugins/*/skills/*/SKILL.md"))
+n_a = len(glob.glob("plugins/*/agents/*.md"))
+n_c = len(glob.glob("plugins/*/commands/*.md"))
+print("ok    %d skills, %d agents, %d commands all declare valid frontmatter" % (n_s, n_a, n_c))
+PY4
+if [ $? -eq 0 ]; then ok "skills/agents/commands frontmatter is valid"; else bad "a component has frontmatter that would not load"; fi
 
 echo
 echo "-------------------------------------------"

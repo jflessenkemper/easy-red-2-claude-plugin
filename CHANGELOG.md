@@ -4,6 +4,35 @@ All notable changes to the **easy-red-2** Claude Code plugin.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0]
+
+### Added
+- **`agents/playtest-runner.md`** — a subagent for long unattended play-tests, carrying the rules
+  that have cost this project the most time (wait on log EVIDENCE not wall-clock; absence of log
+  lines is not absence of behaviour; a count is not behaviour).
+- **`commands/`** — `/er2-status` (harness, Steam, leftovers, and whether it is safe to touch
+  Steam), `/er2-record` (clip + contact sheet, with the pixel-area frame-rate rule), and
+  `/er2-restore` (put the machine back to normal, verifying each step).
+- **Stop guard now catches leftovers that outlive the session**: a live `ER2 Virtual Pad` on
+  `/dev/input/js0`, and stale `--keep-alive` harness processes. Both actually happened; both are
+  invisible from inside the conversation.
+- **check 13** exercises that guard (clean / stale-harness / escape hatch / no self-match) and
+  **check 14** validates skill, agent and command frontmatter.
+
+### Fixed
+- **The Stop guard exited early when no missions were deployed**, skipping the leftover checks
+  entirely — so on a machine with nothing deployed, a live virtual gamepad or a stale harness
+  would have sailed straight through. Only the BUILD scan is conditional now. Found by writing
+  the test, not by reading the code.
+- **The stale-harness scan matched its own caller.** Any shell command mentioning
+  `AOE3DEHarness` — including the one testing the guard — carries the string in its own `/proc`
+  cmdline, and excluding `$$` does not help because the offender is the PARENT shell. It now
+  requires the process NAME to match as well. This is the same self-match trap that makes the
+  full-cmdline forms of pgrep/pkill unusable in this project.
+- **`record.py` and `virtual_pad.py` were not in the gate's `PY_FILES`**, so the two newest tools
+  had no syntax or undefined-name checking at all.
+- Both skills now declare `name:`, and `playtest` declares `allowed-tools:`.
+
 ## [1.7.0]
 
 ### Added

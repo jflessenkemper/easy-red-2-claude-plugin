@@ -1,4 +1,5 @@
 ---
+name: visual-test
 description: Visually PROVE an Easy Red 2 mod behaviour on screen — deploy, launch, get in-mission, enter Free Camera, ascend, orbit for a 360° panorama, and reject empty frames automatically so a screenshot actually counts as evidence.
 allowed-tools: er2_deploy, er2_launch, er2_state, er2_play_mission, er2_screenshot, er2_click, er2_key, er2_look, er2_move_rel, er2_button, er2_log, Bash, Read
 ---

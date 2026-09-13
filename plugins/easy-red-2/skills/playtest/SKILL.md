@@ -1,5 +1,7 @@
 ---
+name: playtest
 description: Run an Easy Red 2 play-test of the Realistic soldier-AI mod end-to-end — deploy scripts, launch headless, observe behaviour, read the decision trace, and report what to fix.
+allowed-tools: er2_deploy, er2_launch, er2_state, er2_play_mission, er2_screenshot, er2_click, er2_key, er2_lua, er2_log, er2_missions, er2_stop, Bash, Read
 ---
 
 Run a full play-test cycle of the Realistic mod. Target mission: "$ARGUMENTS" (if empty, call
