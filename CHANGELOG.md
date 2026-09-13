@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   README's manual-launch example against the tool's real flags.
 
 ### Fixed
+- **The plugin was never installed.** Only `frontend-design` was enabled, so the MCP tools,
+  skills, commands **and hooks** had never been active in any session — the Steam-shutdown guard
+  was written, unit-tested and gated, but not wired in, so it could not have prevented the
+  incident it was written for. The repo is now registered as a local `directory` marketplace.
+- **`marketplace.json` advertised 1.0.0 against `plugin.json`'s 1.8.0** — the listing a user reads
+  before installing was eight minor releases behind what they actually get. Gated by **check 16**.
+- **`server.py` hardcoded `serverInfo.version = "1.0.0"`**, so the MCP `initialize` response had
+  been reporting an untrue version for months. It now derives from `plugin.json`. **check 17**
+  drives the real stdio protocol — `initialize` + `tools/list` — because checks 3 and 4 only
+  imported the module, and a server can import perfectly while answering nothing.
 - **The Stop guard exited early when no missions were deployed**, skipping the leftover checks
   entirely — so on a machine with nothing deployed, a live virtual gamepad or a stale harness
   would have sailed straight through. Only the BUILD scan is conditional now. Found by writing

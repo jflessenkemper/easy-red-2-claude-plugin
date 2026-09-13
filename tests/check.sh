@@ -407,6 +407,86 @@ print("ok    README launch example agrees with the real flags and socket path")
 PY5
 if [ $? -eq 0 ]; then ok "README launch example matches the tool"; else bad "README launch example has drifted from the tool"; fi
 
+echo "== 16. marketplace.json and plugin.json agree on the version =="
+# The marketplace entry is what a user sees BEFORE installing; plugin.json is what they get.
+# These had drifted to 1.0.0 vs 1.8.0, so the listing advertised a version eight minor releases
+# behind the thing it installs.
+python3 - <<'PY6'
+import json, sys
+m = json.load(open(".claude-plugin/marketplace.json"))
+p = json.load(open("plugins/easy-red-2/.claude-plugin/plugin.json"))
+entry = next((e for e in m["plugins"] if e["name"] == p["name"]), None)
+if entry is None:
+    print("FAIL  marketplace.json has no entry for %r" % p["name"]); sys.exit(1)
+if entry.get("version") != p.get("version"):
+    print("FAIL  marketplace.json says %s but plugin.json says %s"
+          % (entry.get("version"), p.get("version"))); sys.exit(1)
+print("ok    marketplace and plugin manifests agree on %s" % p["version"])
+PY6
+if [ $? -eq 0 ]; then ok "marketplace/plugin versions agree"; else bad "marketplace and plugin versions disagree"; fi
+
+echo "== 17. The MCP server actually SPEAKS MCP (not just imports) =="
+# Checks 3 and 4 import the module. A server can import perfectly and still fail at runtime -
+# crash on startup, never answer initialize, or advertise tools it cannot list. This drives the
+# real stdio protocol the way Claude Code does, and also catches the version drifting again:
+# serverInfo.version was hardcoded and sat at 1.0.0 while the manifest said 1.8.0.
+python3 - <<'PY7'
+import json, subprocess, sys, time
+srv = "plugins/easy-red-2/tools/er2_mcp/server.py"
+man = json.load(open("plugins/easy-red-2/.claude-plugin/plugin.json"))
+p = subprocess.Popen([sys.executable, srv], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                     stderr=subprocess.PIPE, text=True, bufsize=1)
+fail = []
+try:
+    for msg in ({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+                    "protocolVersion":"2024-11-05","capabilities":{},
+                    "clientInfo":{"name":"check","version":"1"}}},
+                {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}):
+        p.stdin.write(json.dumps(msg) + "\n"); p.stdin.flush()
+    p.stdin.close()
+    seen = {}
+    deadline = time.time() + 30
+    while len(seen) < 2 and time.time() < deadline:
+        line = p.stdout.readline()
+        if not line:
+            break
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if "id" in d:
+            seen[d["id"]] = d
+finally:
+    p.kill()
+
+if 1 not in seen:
+    fail.append("server never answered initialize over stdio")
+else:
+    info = seen[1].get("result", {}).get("serverInfo", {})
+    if info.get("version") != man.get("version"):
+        fail.append("serverInfo.version=%r but plugin.json=%r - initialize reports a version "
+                    "that is not true" % (info.get("version"), man.get("version")))
+    if info.get("name") != man.get("name"):
+        fail.append("serverInfo.name=%r but plugin.json name=%r" % (info.get("name"), man.get("name")))
+
+if 2 not in seen:
+    fail.append("server never answered tools/list")
+else:
+    tools = [t.get("name") for t in seen[2].get("result", {}).get("tools", [])]
+    if not tools:
+        fail.append("tools/list returned no tools")
+    for t in tools:
+        if not t or not t.startswith("er2_"):
+            fail.append("tool %r does not follow the er2_ naming convention" % t)
+
+if fail:
+    for f in fail:
+        print("FAIL  " + f)
+    sys.exit(1)
+print("ok    MCP handshake works; %d tools listed; serverInfo matches the manifest" % len(tools))
+PY7
+if [ $? -eq 0 ]; then ok "MCP server speaks the protocol"; else bad "MCP server does not answer the real protocol"; fi
+
 echo
 echo "-------------------------------------------"
 printf 'PASS %d   FAIL %d\n' "$PASS" "$FAIL"

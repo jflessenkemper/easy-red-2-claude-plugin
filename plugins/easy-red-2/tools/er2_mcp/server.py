@@ -41,7 +41,24 @@ import time
 from pathlib import Path
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_INFO = {"name": "easy-red-2", "version": "1.0.0"}
+
+
+def _plugin_version():
+    """Read the version from plugin.json rather than repeating it here.
+
+    It was hardcoded to "1.0.0" and silently drifted eight minor releases behind
+    the manifest, so `initialize` reported a version that had not been true for
+    months. The version now lives in exactly one file.
+    """
+    try:
+        manifest = Path(__file__).resolve().parents[2] / ".claude-plugin" / "plugin.json"
+        with open(manifest, encoding="utf-8") as fh:
+            return json.load(fh).get("version") or "0.0.0"
+    except (OSError, ValueError):
+        return "0.0.0"
+
+
+SERVER_INFO = {"name": "easy-red-2", "version": _plugin_version()}
 
 # ---------------------------------------------------------------- configuration
 # Everything is overridable by env (see .mcp.json), but defaults are DISCOVERED rather than
