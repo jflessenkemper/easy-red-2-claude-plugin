@@ -27,7 +27,26 @@ rot: 0;9.213078;0
 Semicolon-separated `x;y;z`, rotation in the same order. This is directly authorable from a script,
 which makes a purpose-built cover/obstacle layout possible without touching the editor UI.
 
-**The blocker is the id vocabulary.** Only two ids are confirmed:
+### The id vocabulary comes from the editor's prop palette
+
+**Scene → Add Prop** opens a searchable palette, read on screen 2026-09-18. It has a `Search...` box
+(~1072,144), six category tabs down the left — **props, buildings, environment, streets, terrain,
+deprecated** — and a red **CANCEL** at ~(696,1001) which closes it without placing anything.
+
+**The ids are the displayed labels verbatim**, which is consistent with `Trench 1` in the file on
+disk. Entries read directly off the first page of `props`:
+
+`Ammo Crate`, `Ammunition Refill Box`, `Ardennes Sign Bastogne` (also `Doncherry`, `Flamierge`,
+`Foy`, `Margeret`, `Marvie`, `Noville`, `Sedan`, `Stonne`), `Armchair Fancy`, `Barbed Wire Double`,
+`Barbed Wire Double Long`, `Barbed Wire Single`, `Barbed Wire Single Long`, `Barrel Oil Drum`,
+`Barrel Wood`.
+
+So the palette — not the asset bundle — is the practical way to enumerate ids: search a term, read
+the labels, then CANCEL. The list is alphabetical, so the categories plus the search box beat
+scrolling. **The rest of the vocabulary is still unharvested**; the cover props an AI test level
+needs (sandbags, low walls, hedges) have not been read yet, and the `terrain` category is unexamined.
+
+Two ids are additionally confirmed from files:
 
 | id | namespace | seen in |
 |---|---|---|
