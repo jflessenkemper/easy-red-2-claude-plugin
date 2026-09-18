@@ -4,6 +4,31 @@ All notable changes to the **easy-red-2** Claude Code plugin.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0]
+
+### Added
+- **`/er2-review` — review the AI by record-and-scrub, which needs no test map at all.** This is
+  the documented industry approach for the case where the oracle is a human judging whether the
+  battle *looks* right: David Young (Treyarch), *Debugging AI with Instant In-Game Scrubbing*,
+  Game AI Pro 3 Ch. 6 — *"the ability to debug directly in production levels without the need to
+  reproduce the issue in a test map ... saves countless man hours"*. The tooling already existed
+  and was simply switched off: the mod emits nine fields per soldier every 2 s
+  (`[TELEM] t S uid,x,y,z,flag,squad,inVeh,dec,ri`) and `tools/battle_map.py` already renders them
+  with play/scrub, movement trails and colour by **decision**, side or height.
+- **`docs/map-formats.md`** — what is programmatically writable and what is not. `tx_data_objects.er2f`
+  is plain ASCII (`id:` / `pos:` / `rot:`) so map props ARE authorable from a script; the `.mer2` is
+  a .NET BinaryFormatter stream and should be left to `setFactionBudget` instead of patched; terrain
+  height remains uncracked. Also records that the editor is TWO editors — the plugin had only ever
+  driven the Mission Editor, never the Map Editor.
+
+### Fixed
+- **check 13's baseline depended on whether a game happened to be running.** It asserts "clean
+  session -> allow", and with the ER2 game genuinely up a real harness process existed, the guard
+  correctly blocked, and the gate reported a code defect that did not exist. `ER2_FAKE_HARNESS` now
+  pins the count, mirroring the AppId pin in check 12. The two cases that must exercise the REAL
+  /proc scan keep doing so, and the self-match case now SKIPS with a printed reason when a live
+  harness makes the assertion undecidable — skipping loudly beats failing misleadingly.
+
 ## [1.12.0]
 
 ### Added

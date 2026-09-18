@@ -76,6 +76,14 @@ fi
 #    counted. Excluding $$ is not enough, because the offender is usually the PARENT shell. So
 #    require the process NAME to be the harness too; a shell can carry the text but never the
 #    comm. This is the same self-match trap that makes pgrep -f unusable here.
+#
+#    ER2_FAKE_HARNESS pins the count so the gate is hermetic. Without it check 13's baseline
+#    asserted "clean session -> allow" while a REAL harness happened to be running, and failed for
+#    an environmental reason rather than a code one - the same flakiness the AppId pin fixes in
+#    guard-bash.sh. A test whose result depends on whether a game is open is not a test.
+if [ -n "${ER2_FAKE_HARNESS+set}" ]; then
+    stale=${ER2_FAKE_HARNESS:-0}
+else
 stale=0
 for p in /proc/[0-9]*; do
     [ "${p#/proc/}" = "$$" ] && continue
@@ -88,6 +96,7 @@ for p in /proc/[0-9]*; do
         *AOE3DEHarness*) stale=$((stale + 1)) ;;
     esac
 done
+fi
 if [ "$stale" -gt 0 ] && [ "${ER2_SKIP_HARNESS_CHECK:-0}" != "1" ]; then
     echo "BLOCKED: $stale harness process(es) are still running. They carry --keep-alive and \
 IGNORE SIGTERM, and Steam will refuse to start the game while they exist - the next er2_launch \

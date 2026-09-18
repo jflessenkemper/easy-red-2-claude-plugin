@@ -273,6 +273,11 @@ fail = []
 env0 = dict(os.environ)
 env0["ER2_SKIP_PAD_CHECK"] = "1"
 env0["ER2_CFG_DIR"] = tempfile.mkdtemp()      # no deployed builds to police
+# PIN the harness count. This baseline asserts "clean session -> allow", and it failed for an
+# environmental reason the first time the ER2 game happened to be running while the gate ran: a
+# real harness process existed, the guard correctly blocked, and the test reported a code defect
+# that was not there. Same flakiness the AppId pin fixes in check 12.
+env0["ER2_FAKE_HARNESS"] = "0"
 
 def rc(env):
     return subprocess.run(["bash", guard], capture_output=True, text=True,
@@ -290,7 +295,10 @@ os.chmod(fake, 0o755)
 proc = subprocess.Popen([fake, "/x/AOE3DEHarness", "--keep-alive"])
 try:
     time.sleep(1.0)
-    if rc(env0) != 2:
+    # Exercise the REAL /proc scan for this one case: unset the pin so the decoy must be found by
+    # comm+cmdline matching, which is the logic actually under test.
+    envreal = dict(env0); envreal.pop("ER2_FAKE_HARNESS", None)
+    if rc(envreal) != 2:
         fail.append("Stop guard ALLOWED a stale harness process (expected 2)")
     env1 = dict(env0); env1["ER2_SKIP_HARNESS_CHECK"] = "1"
     if rc(env1) != 0:
@@ -300,11 +308,21 @@ finally:
 
 # self-match regression: merely NAMING the harness must not trip it. Excluding $$ is not enough,
 # because the offender is the PARENT shell -- this is why the guard also matches on comm.
-env2 = dict(env0)
-r = subprocess.run(["bash", "-c", "bash %s # AOE3DEHarness" % guard],
-                   capture_output=True, text=True, timeout=60, env=env2)
-if r.returncode != 0:
-    fail.append("Stop guard self-matches a shell command that merely mentions AOE3DEHarness")
+# This one MUST use the real scan (that is the point), so it is only decidable when no genuine
+# harness is running. Skipping loudly beats failing misleadingly.
+env2 = dict(env0); env2.pop("ER2_FAKE_HARNESS", None)
+real_up = subprocess.run(["bash", "-c",
+    "n=0; for p in /proc/[0-9]*; do c=$(cat $p/comm 2>/dev/null); "
+    "case \"$c\" in gamescope-wl|AOE3DEHarness) n=$((n+1));; esac; done; echo $n"],
+    capture_output=True, text=True, timeout=30).stdout.strip()
+if real_up not in ("", "0"):
+    print("note  self-match case SKIPPED: %s real harness process(es) running, so the "
+          "assertion cannot discriminate" % real_up)
+else:
+    r = subprocess.run(["bash", "-c", "bash %s # AOE3DEHarness" % guard],
+                       capture_output=True, text=True, timeout=60, env=env2)
+    if r.returncode != 0:
+        fail.append("Stop guard self-matches a shell command that merely mentions AOE3DEHarness")
 
 if fail:
     for f in fail:
