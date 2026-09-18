@@ -51,11 +51,16 @@ def parse(path):
                 except ValueError:
                     continue
                 if kind == "S":
-                    if len(parts) >= 8:          # uid,x,y,z,flag,squad,inVeh,dec
+                    if len(parts) >= 8:          # uid,x,y,z,flag,squad,inVeh,dec[,ri,role]
+                        # role: 10th field, added 2026-09-18 so formation claims are decidable
+                        # (the LMG gunner has no native flag, so the brain publishes the code).
+                        # Nine-field logs recorded before that simply read 0 = trooper; the frame
+                        # stayed backward compatible on purpose, both parsers gating on >= 8.
+                        role = int(parts[9]) if len(parts) >= 10 and parts[9].isdigit() else 0
                         fr["s"].append([uid, int(parts[1]), int(parts[3]), parts[4][:1],
-                                        int(parts[2]), int(parts[7])])
+                                        int(parts[2]), int(parts[7]), role])
                     else:                        # legacy uid,x,z,flag[,squad]
-                        fr["s"].append([uid, x, z, parts[3][:1], 0, 0])
+                        fr["s"].append([uid, x, z, parts[3][:1], 0, 0, 0])
                 else:
                     if len(parts) >= 5:          # uid,x,y,z,name
                         vnames[uid] = ",".join(parts[4:])
@@ -210,6 +215,7 @@ HTML = """<title>Crossing at Donchery — battle plot</title>
     <label class="tog"><input type="radio" name="col" id="colSide" checked> Colour: side</label>
     <label class="tog"><input type="radio" name="col" id="colHeight"> height</label>
     <label class="tog"><input type="radio" name="col" id="colDec"> decision</label>
+    <label class="tog"><input type="radio" name="col" id="colRole"> role</label>
   </div>
 
   <div class="key">
@@ -271,6 +277,18 @@ const DECCOL = {
   17:'#e8a33d',                                                           // fire mission
   5:'#b07cc6', 6:'#b07cc6', 8:'#d98cb0', 9:'#d98cb0',                     // AT / assault
   2:'#6e7681', 0:'#4a5058',                                               // mounted / unknown
+};
+
+// Role palette. Source of truth for the codes is DEC.rolecode in er2-realistic/Realistic.lua.
+// The GUNNER is deliberately the only vivid colour and troopers are near-background: the question
+// this mode exists to answer is "do the riflemen form a Schuetzenkette ON the gunner", and that is
+// a question about one man's position relative to the rest, so he has to be findable at a glance.
+const ROLECOL = {
+  4:'#ffd24a',                        // MG-gunner - the formation anchor
+  1:'#5b9dd9', 7:'#7fc4ff',           // leader / radioman
+  2:'#5fb87a', 3:'#b07cc6',           // medic / AT
+  5:'#e8a33d', 6:'#d98cb0',           // mortar / marksman
+  8:'#6e7681', 0:'#3a3f46',           // crew / trooper
 };
 
 // World -> canvas, aspect preserved so the ground is never stretched.
@@ -338,6 +356,7 @@ function draw(i){
     else if (q==='d'){ col = DEF; hollow = true; }
     if (document.getElementById('colHeight').checked) col = heightColour(e[4]|0);
     else if (document.getElementById('colDec').checked) col = DECCOL[e[5]|0] || '#4a5058';
+    else if (document.getElementById('colRole').checked) col = ROLECOL[e[6]|0] || '#3a3f46';
     g.beginPath(); g.arc(x,y,2.8,0,6.2832);
     if (hollow){ g.strokeStyle = col; g.lineWidth = 1.3; g.stroke(); }
     else { g.fillStyle = col; g.fill(); }
@@ -381,7 +400,7 @@ playBtn.addEventListener('click', () => {
 });
 slider.addEventListener('input', () => draw(+slider.value));
 trailsBox.addEventListener('change', () => draw(+slider.value));
-for (const id of ['colSide','colHeight','colDec'])
+for (const id of ['colSide','colHeight','colDec','colRole'])
   document.getElementById(id).addEventListener('change', () => draw(+slider.value));
 gridBox.addEventListener('change', () => draw(+slider.value));
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => draw(+slider.value));
