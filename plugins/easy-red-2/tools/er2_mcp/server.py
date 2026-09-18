@@ -521,7 +521,11 @@ def t_launch(args):
     p = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT, env=env,
                          start_new_session=True)
     # wait for socket + ready
-    deadline = time.time() + float(args.get("timeout_s", 90))
+    # 210s, not 90. Direct mode boots the whole Unity game behind a headless compositor; Steam mode
+    # (above) already allowed 180. The default was the lower of the two for the slower path, so the
+    # tool reported "launch timed out ... no socket yet" for a launch that was merely still booting
+    # - measured 2026-09-18, where 150s was also not enough and the socket appeared right after.
+    deadline = time.time() + float(args.get("timeout_s", 210))
     last = "no socket yet"
     while time.time() < deadline:
         if os.path.exists(SOCK):
@@ -582,7 +586,55 @@ def _isolate_audio():
         return "audio isolation failed: %s" % e
 
 
+def _scan_procs():
+    """Return (harness_pids, game_pids) for LIVE processes.
+
+    Zombies are skipped: a zombie's cmdline is empty, so it cannot match either pattern. That is
+    deliberate - a zombie is already dead and signalling it does nothing, but counting it makes a
+    cleanup check report "not clean" forever and sends you hunting an unkillable pid (which is
+    exactly what happened with 202057 on 2026-09-18).
+    """
+    harness, game = [], []
+    for e in os.listdir("/proc"):
+        if not e.isdigit():
+            continue
+        try:
+            with open("/proc/%s/comm" % e) as f:
+                comm = f.read().strip()
+            with open("/proc/%s/cmdline" % e, "rb") as f:
+                cmd = f.read().decode("utf-8", "replace")
+        except OSError:
+            continue            # process exited mid-scan
+        if not cmd:
+            continue            # zombie
+        if comm in ("gamescope-wl", "AOE3DEHarness") and "AOE3DEHarness" in cmd:
+            harness.append(int(e))
+        elif comm.startswith("Easy Red 2.x86") and "Easy Red 2" in cmd:
+            game.append(int(e))
+    return harness, game
+
+
+def _reap():
+    """Non-blocking reap of our exited children.
+
+    t_launch spawns with Popen and never wait()s, so every launch leaves a zombie behind once it
+    exits. NOTE: signal.SIGCHLD = SIG_IGN would also fix this and is NOT usable here - this module
+    calls subprocess.run() for pactl/steam, and that needs waitpid to work.
+    """
+    n = 0
+    while True:
+        try:
+            pid, _ = os.waitpid(-1, os.WNOHANG)
+        except (ChildProcessError, OSError):
+            break
+        if not pid:
+            break
+        n += 1
+    return n
+
+
 def t_stop(args):
+    _reap()
     killed = []
     try:
         st = parse_state(hsend(["STATE"])[0])
@@ -595,7 +647,35 @@ def t_stop(args):
                 except ProcessLookupError:
                     pass
     except HarnessError as e:
-        return [text("nothing to stop (%s)" % e)]
+        # An unreachable socket does NOT mean nothing is running. The socket is unlinked when a
+        # harness is SIGKILLed, and the GAME it spawned does not die with it. Returning
+        # "nothing to stop" here was actively misleading: on 2026-09-18 this path said exactly
+        # that while game pid 69695 kept running for a day, then competed with the next launch
+        # and made it time out. So fall back to a process scan and stop them for real.
+        harness, game = _scan_procs()
+        if not harness and not game:
+            return [text("nothing to stop (%s)" % e)]
+        note = "socket unreachable (%s); fell back to a process scan" % e
+        for sig in (15, 9):
+            for pid in game + harness:          # game first, then its wrapper
+                try:
+                    os.kill(pid, sig)
+                except OSError:
+                    pass
+            time.sleep(2.0)
+            harness, game = _scan_procs()
+            if not harness and not game:
+                break
+        _reap()
+        try:
+            os.path.exists(SOCK) and os.unlink(SOCK)
+        except OSError:
+            pass
+        left = harness + game
+        if left:
+            return [text("%s - but pid(s) %s SURVIVED SIGKILL; check them by hand"
+                         % (note, ", ".join(str(x) for x in left)))]
+        return [text("%s; all harness and game processes stopped, socket clear" % note)]
 
     # WAIT for the harness socket to go away before returning. Returning the instant SIGTERM is
     # sent makes an immediately-following er2_launch fail with
@@ -1204,7 +1284,7 @@ TOOLS = {
                      "cannot reach the speakers (default TRUE — leave on unless you need sound)"},
             "via_steam": {"type": "boolean", "description": "launch through Steam so DLC "
                           "entitlements are visible (REQUIRED for DLC maps/missions)"},
-            "timeout_s": {"type": "integer", "description": "seconds to wait for ready (default 90)"}}},
+            "timeout_s": {"type": "integer", "description": "seconds to wait for ready (default 210; a cold direct-mode boot has measured over 150)"}}},
     },
     "er2_stop": {
         "fn": t_stop,
