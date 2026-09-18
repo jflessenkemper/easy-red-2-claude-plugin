@@ -105,4 +105,34 @@ will time out with 'harness socket not found'. Clear them with: pkill -9 -x game
     exit 2
 fi
 
+# 3. An ORPHANED GAME process. Killing the harness does NOT kill the game it spawned: on
+#    2026-09-18 harness 69668 was SIGKILLed, "harness processes remaining: 0" was reported and
+#    believed, and game pid 69695 went on running for a day. It then competed with a fresh launch
+#    (two Unity instances) and made that launch time out, which got misdiagnosed twice before
+#    anyone thought to look for a process that was not a harness.
+#
+#    Counting only what you went looking for is how that happened; this check looks for the OTHER
+#    half. Zombies are excluded for free - a zombie has an empty cmdline so it cannot match the
+#    pattern (verified: a zombie gamescope-wl sat unreaped while this guard correctly exited 0).
+if [ "${ER2_SKIP_HARNESS_CHECK:-0}" != "1" ]; then
+    orphan=0
+    for p in /proc/[0-9]*; do
+        [ "${p#/proc/}" = "$$" ] && continue
+        case "$(head -c 64 "$p/comm" 2>/dev/null)" in
+            "Easy Red 2.x86"*) : ;;
+            *) continue ;;
+        esac
+        case "$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null)" in
+            *"Easy Red 2"*) orphan=$((orphan + 1)) ;;
+        esac
+    done
+    if [ "$orphan" -gt 0 ]; then
+        echo "BLOCKED: $orphan Easy Red 2 game process(es) are still running. SIGKILLing the \
+harness leaves the game it spawned alive, and an orphan competes with the next launch until it is \
+cleared. Stop it with er2_stop if a harness is attached, otherwise kill the pid directly, then \
+re-scan for BOTH names - 'Easy Red 2.x86_64' as well as gamescope-wl/AOE3DEHarness." >&2
+        exit 2
+    fi
+fi
+
 exit 0
