@@ -387,6 +387,103 @@ def running_foreign_appids():
     return sorted(found)
 
 
+def _socket_status():
+    """Classify SOCK without touching any process: 'absent', 'live', or 'stale'.
+
+    'stale' means the path exists but nobody is listening (ECONNREFUSED/ENOENT on connect) -
+    the leftover of a SIGKILLed harness. A socket that accepts but answers slowly is 'live'.
+    """
+    if not os.path.exists(SOCK):
+        return "absent"
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(2.0)
+    try:
+        s.connect(SOCK)
+        return "live"
+    except (ConnectionRefusedError, FileNotFoundError):
+        return "stale"
+    except OSError:
+        return "live"           # timeout / EAGAIN: something is there, do not unlink it
+    finally:
+        s.close()
+
+
+def _clear_stale_socket():
+    """Unlink SOCK only when it is GENUINELY stale: nobody listening AND no harness process.
+
+    Returns (ok, note). ok=False means a harness process exists but its socket refuses - it may
+    still be booting or be wedged; unlinking would orphan it from every later call, so refuse and
+    let the caller (or er2_stop's process scan) deal with it.
+    """
+    st = _socket_status()
+    if st != "stale":
+        return True, "socket %s" % st
+    harness, game = _scan_procs()
+    if harness or game:
+        return False, ("socket at %s refuses connections but harness/game pid(s) %s are alive - "
+                       "run er2_stop first" % (SOCK, ", ".join(str(x) for x in harness + game)))
+    try:
+        os.unlink(SOCK)
+    except OSError as e:
+        return False, "stale socket at %s could not be removed: %s" % (SOCK, e)
+    return True, "removed stale socket %s (no listener, no harness process)" % SOCK
+
+
+class _Boot:
+    """Boot-progress reporter for the launch wait.
+
+    Each phase change is recorded with elapsed seconds, written to stderr (the MCP client log)
+    and, when the caller passed _meta.progressToken, sent as notifications/progress - so a
+    multi-minute boot is no longer a silent "no socket yet".
+    """
+    def __init__(self, timeout):
+        self.t0, self.timeout, self.trail, self.last = time.time(), timeout, [], None
+
+    def phase(self, desc):
+        if desc == self.last:
+            return
+        self.last = desc
+        el = time.time() - self.t0
+        self.trail.append("%5.0fs %s" % (el, desc))
+        sys.stderr.write("er2_launch: %5.0fs %s\n" % (el, desc))
+        sys.stderr.flush()
+        if _PROGRESS_TOKEN[0] is not None:
+            sys.stdout.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/progress",
+                "params": {"progressToken": _PROGRESS_TOKEN[0], "progress": round(el, 1),
+                           "total": self.timeout, "message": desc}}) + "\n")
+            sys.stdout.flush()
+
+    def observe(self, harness_pid=None):
+        """Derive the current boot phase from what is observable, never from elapsed time."""
+        _reap()
+        if harness_pid is not None and not os.path.exists("/proc/%d/cmdline" % harness_pid):
+            self.phase("harness pid %d EXITED" % harness_pid)
+            return None
+        harness, game = _scan_procs()
+        if not os.path.exists(SOCK):
+            if game:
+                self.phase("game process up (pid %s), harness socket not yet created" % game[0])
+            elif harness:
+                self.phase("harness up (pid %s), waiting for game process" % harness[0])
+            else:
+                self.phase("waiting for harness process")
+            return None
+        try:
+            st = parse_state(hsend(["STATE"])[0])
+        except HarnessError as e:
+            self.phase("socket present, not answering yet (%s)" % str(e)[:60])
+            return None
+        self.phase("socket answering: ready=%s inner_alive=%s"
+                   % (st.get("ready"), st.get("inner_alive")))
+        return st
+
+    def report(self):
+        return "boot progress:\n  " + "\n  ".join(self.trail)
+
+
+_PROGRESS_TOKEN = [None]
+
+
 def t_launch(args):
     width = int(args.get("width", 1920))
     height = int(args.get("height", 1080))
@@ -414,13 +511,17 @@ def t_launch(args):
                 "their game.\n"
                 "Wait until they have finished, or ask. Pass force:true only if the user has "
                 "explicitly said it is fine right now." % ", ".join(foreign))]
+    _reap()
     if os.path.exists(SOCK):
         try:
             st = parse_state(hsend(["STATE"])[0])
             if st.get("inner_alive") == "1":
                 return [text("already running: %s" % json.dumps(st))]
         except HarnessError:
-            pass  # stale socket, fall through and relaunch
+            pass  # unreachable: decide below whether it is genuinely stale
+    ok, sock_note = _clear_stale_socket()
+    if not ok:
+        return [text("er2_launch REFUSED (nothing was launched): " + sock_note)]
 
     # STEAM MODE (required for DLC): a directly-launched process cannot verify DLC
     # entitlements, so DLC missions show "Needs DLCs: ..." and refuse to open. Launching
@@ -436,31 +537,28 @@ def t_launch(args):
         problem = _preflight_steam(args)
         if problem:
             return [text("er2_launch PREFLIGHT FAILED (nothing was launched):\n\n" + problem)]
-        try:
-            os.path.exists(SOCK) and os.unlink(SOCK)
-        except OSError:
-            pass
+        if _socket_status() != "absent":
+            return [text("er2_launch REFUSED: socket %s is still present after the stale check - "
+                         "a harness answered but its game is not alive; run er2_stop first" % SOCK)]
         env = dict(os.environ)
         env.setdefault("XDG_RUNTIME_DIR", "/run/user/1000")
         subprocess.Popen(["xdg-open", "steam://rungameid/%s" % APPID],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          env=env, start_new_session=True)
-        deadline = time.time() + float(args.get("timeout_s", 180))
+        boot = _Boot(float(args.get("timeout_s", 180)))
+        boot.phase("asked Steam to launch AppId %s (%s)" % (APPID, sock_note))
+        deadline = time.time() + boot.timeout
         while time.time() < deadline:
-            if os.path.exists(SOCK):
-                try:
-                    st = parse_state(hsend(["STATE"])[0])
-                    if st.get("ready") == "1" and st.get("inner_alive") == "1":
-                        msg = ("launched via Steam (DLC entitlements available). STATE=%s"
-                               % json.dumps(st)
-                               + "\naudio: " + _isolate_audio())
-                        return [text(_with_workshop_warning(msg))]
-                except HarnessError:
-                    pass
+            st = boot.observe()
+            if st and st.get("ready") == "1" and st.get("inner_alive") == "1":
+                msg = ("launched via Steam (DLC entitlements available). STATE=%s"
+                       % json.dumps(st)
+                       + "\naudio: " + _isolate_audio() + "\n" + boot.report())
+                return [text(_with_workshop_warning(msg))]
             time.sleep(3)
         return [text("Steam launch timed out. Check that launch options are set: "
                      "python3 tools/fix_steam_launch_options.py  (Steam must be shut down to "
-                     "apply). Socket expected at %s" % SOCK)]
+                     "apply). Socket expected at %s\n%s" % (SOCK, boot.report()))]
     if not os.path.exists(HARNESS):
         return [text("ERROR harness binary missing: %s" % HARNESS)]
     if not os.path.exists(GAME_BIN):
@@ -525,24 +623,25 @@ def t_launch(args):
     # (above) already allowed 180. The default was the lower of the two for the slower path, so the
     # tool reported "launch timed out ... no socket yet" for a launch that was merely still booting
     # - measured 2026-09-18, where 150s was also not enough and the socket appeared right after.
-    deadline = time.time() + float(args.get("timeout_s", 210))
-    last = "no socket yet"
+    boot = _Boot(float(args.get("timeout_s", 210)))
+    boot.phase("spawned harness pid %d (%s)" % (p.pid, sock_note))
+    deadline = time.time() + boot.timeout
     while time.time() < deadline:
-        if os.path.exists(SOCK):
-            try:
-                st = parse_state(hsend(["STATE"])[0])
-                last = json.dumps(st)
-                if st.get("ready") == "1" and st.get("inner_alive") == "1":
-                    if args.get("mute", True):
-                        last += " audio=" + _isolate_audio()
-                    msg = ("launched harness pid=%s; game ready. STATE=%s" % (p.pid, last)
-                           + "\nNOTE: direct mode gets NO DLC entitlement - DLC maps show a dead "
-                             "\"Needs DLCs: <name>\" sub-row in the mission list and will not open.")
-                    return [text(_with_workshop_warning(msg))]
-            except HarnessError as e:
-                last = str(e)
+        st = boot.observe(p.pid)
+        if p.poll() is not None:       # harness died: say so now instead of waiting out 210 s
+            return [text("harness pid %d exited with %s during boot (see %s/harness.log)\n%s"
+                         % (p.pid, p.returncode, TMP, boot.report()))]
+        if st and st.get("ready") == "1" and st.get("inner_alive") == "1":
+            last = json.dumps(st)
+            if args.get("mute", True):
+                last += " audio=" + _isolate_audio()
+            msg = ("launched harness pid=%s; game ready. STATE=%s" % (p.pid, last)
+                   + "\nNOTE: direct mode gets NO DLC entitlement - DLC maps show a dead "
+                     "\"Needs DLCs: <name>\" sub-row in the mission list and will not open.\n"
+                   + boot.report())
+            return [text(_with_workshop_warning(msg))]
         time.sleep(2)
-    return [text("launch timed out after waiting. last=%s (see %s/harness.log)" % (last, TMP))]
+    return [text("launch timed out after waiting (see %s/harness.log)\n%s" % (TMP, boot.report()))]
 
 
 def _isolate_audio():
@@ -1480,6 +1579,7 @@ def handle(msg):
         if not tool:
             return {"jsonrpc": "2.0", "id": mid,
                     "result": {"content": [text("unknown tool %s" % name)], "isError": True}}
+        _PROGRESS_TOKEN[0] = (params.get("_meta") or {}).get("progressToken")
         try:
             content = tool["fn"](args)
             return {"jsonrpc": "2.0", "id": mid, "result": {"content": content, "isError": False}}

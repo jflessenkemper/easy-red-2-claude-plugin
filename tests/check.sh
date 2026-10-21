@@ -736,6 +736,16 @@ print("ok    all %d hook commands exist and are executable" % seen)
 PY12
 if [ $? -eq 0 ]; then ok "hook scripts are runnable"; else bad "a hook script would silently never run"; fi
 
+echo "== 23. Harness lifecycle helpers behave (offline: no game, no harness) =="
+# stale-socket unlink only when nobody listens AND no harness process; _reap against a real
+# zombie; boot progress derived from observable state; the gamescope-wl kill rule. Each assertion
+# was proven red by mutating server.py (always-unlink, no-op waitpid, no phase dedup).
+if python3 tests/offline_lifecycle.py >/tmp/er2_lifecycle.out 2>&1; then
+  ok "lifecycle: $(grep -c '^  ok' /tmp/er2_lifecycle.out) offline assertions pass"
+else
+  grep -E 'FAIL|Error' /tmp/er2_lifecycle.out | head -5; bad "harness lifecycle helpers regressed"
+fi
+
 echo
 echo "-------------------------------------------"
 printf 'PASS %d   FAIL %d\n' "$PASS" "$FAIL"
