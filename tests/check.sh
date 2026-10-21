@@ -14,7 +14,7 @@ ok()  { printf '  \033[32mPASS\033[0m  %s\n' "$1"; PASS=$((PASS+1)); }
 bad() { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; FAIL=$((FAIL+1)); }
 
 SERVER=plugins/easy-red-2/tools/er2_mcp/server.py
-PY_FILES="$SERVER plugins/easy-red-2/tools/visual_probe.py plugins/easy-red-2/tools/record.py plugins/easy-red-2/tools/virtual_pad.py tools/analyse_run.py tools/fix_steam_launch_options.py"
+PY_FILES="$SERVER plugins/easy-red-2/tools/er2_mcp/launch_record.py plugins/easy-red-2/tools/visual_probe.py plugins/easy-red-2/tools/record.py plugins/easy-red-2/tools/virtual_pad.py tools/analyse_run.py tools/fix_steam_launch_options.py"
 
 echo "== 1. Python syntax =="
 for f in $PY_FILES; do
@@ -203,9 +203,13 @@ else:
         "kill -SIGKILL $(pidof steam)",
         "pactl set-sink-mute @DEFAULT_SINK@ 1",
         "for i in $(pactl list short sink-inputs | cut -f1); do pactl set-sink-input-mute $i 1; done",
+        # name-based harness kills: Bazzite Game Mode's gamescope shares the name (2026-10-21)
+        "pkill -9 -x gamescope-wl",
+        "pkill -x gamescope",
+        "killall gamescope-wl",
+        "pkill -9 -x AOE3DEHarness",
     ]
     MUST_ALLOW = [
-        "pkill -9 -x AOE3DEHarness",
         "pactl move-sink-input 2250 er2_silence",
         "pactl list short sinks",
         "pidof steam",
@@ -257,7 +261,7 @@ if fail:
     for f in fail:
         print("FAIL  " + f)
     sys.exit(1)
-print("ok    guard hooks block 6 dangerous forms, allow 4 lookalikes, and gate steam -shutdown on 4 running-game cases")
+print("ok    guard hooks block 10 dangerous forms, allow 3 lookalikes, and gate steam -shutdown on 4 running-game cases")
 PY2
 if [ $? -eq 0 ]; then ok "guard hooks enforce the operational rules"; else bad "guard hooks do not enforce what they claim"; fi
 

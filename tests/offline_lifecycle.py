@@ -4,8 +4,9 @@
   1-4  _clear_stale_socket: absent / genuinely stale / live listener / stale-but-process-alive
   5    _reap against a REAL zombie (a child `true` we spawn and never wait for)
   6    _Boot reports phases from observable state, and emits notifications/progress with a token
-  7    the gamescope-wl kill rule: settings.json allows exactly `pkill -9 -x gamescope-wl` and the
-       guard-process-kill hook lets it through while still denying the -f form
+  7    ownership, not name: a foreign gamescope-wl lookalike (same comm, AOE3DEHarness in its
+       cmdline) survives er2_stop and is protected by the guard; recorded pids and their
+       descendants are stopped; a recycled pid is not ours; no name-based kill is allow-listed
 Every check is written to fail if the behaviour regresses; run with --break to prove that.
 """
 import importlib.util, io, json, os, socket, subprocess, sys, tempfile, time
@@ -88,20 +89,89 @@ check("boot trail has 4 distinct phases, deduplicated: %s" % [t.split(" ", 1)[1]
 check("each phase emitted notifications/progress with the caller's token",
       len(notes) == 4 and all(n["method"] == "notifications/progress" and n["params"]["progressToken"] == "tok1" for n in notes))
 
-# 7 gamescope rule
-settings = os.path.expanduser("~/.claude/settings.json")
-hook = os.path.expanduser("~/.claude/hooks/guard-process-kill.sh")
-if os.path.exists(settings) and os.path.exists(hook):
-    allow = json.load(open(settings)).get("permissions", {}).get("allow", [])
-    check("settings.json allows exactly Bash(pkill -9 -x gamescope-wl)", "Bash(pkill -9 -x gamescope-wl)" in allow)
-    def decide(cmd):
-        r = subprocess.run(["bash", hook], input=json.dumps({"tool_input": {"command": cmd}}), capture_output=True, text=True, timeout=10)
-        return json.loads(r.stdout or "{}").get("hookSpecificOutput", {}).get("permissionDecision", "allow")
-    check("guard hook lets `pkill -9 -x gamescope-wl` through", decide("pkill -9 -x gamescope-wl") == "allow")
-    check("guard hook still denies `pkill -9 -f gamescope-wl`", decide("pkill -9 -f gamescope-wl") == "deny")
-else:
-    print("  SKIP  gamescope rule (no ~/.claude settings/hook on this machine)")
+# 7 ownership, not name: a FOREIGN gamescope-wl is never touched; recorded/descendant ones are
+os.environ["ER2_TMP"] = TMPD
+m.launch_record.TMP = TMPD
+GUARD = os.path.join(ROOT, "plugins/easy-red-2/scripts/guard-bash.sh")
 
-os.rmdir(TMPD)
+def lookalike(parent_cmd=None):
+    """A harmless sleep whose comm is gamescope-wl AND whose cmdline contains AOE3DEHarness -
+    indistinguishable from our harness by name, exactly like Bazzite's gamescope would be."""
+    d = os.path.join(TMPD, "AOE3DEHarness"); os.makedirs(d, exist_ok=True)
+    exe = os.path.join(d, "gamescope-wl")
+    if not os.path.exists(exe):        # a script's comm is the SCRIPT name: one process, no child
+        with open(exe, "w") as f:
+            f.write("#!%s\nimport sys, time\ntime.sleep(int(sys.argv[1]))\n" % sys.executable)
+        os.chmod(exe, 0o755)
+    return subprocess.Popen([exe, "60"], start_new_session=True)
+
+def comm(pid):
+    try:
+        return open("/proc/%d/comm" % pid).read().strip()
+    except OSError:
+        return None
+
+def guard_rc(cmd):
+    env = dict(os.environ, ER2_TMP=TMPD)
+    return subprocess.run([GUARD], input=json.dumps({"tool_input": {"command": cmd}}),
+                          capture_output=True, text=True, timeout=30, env=env).returncode
+
+def alive(pid):
+    try:
+        return [l.split()[1] for l in open("/proc/%d/status" % pid) if l.startswith("State:")][0] != "Z"
+    except OSError:
+        return False
+
+foreign = lookalike()
+time.sleep(0.3)
+try:
+    check("foreign lookalike has comm gamescope-wl and is seen by _scan_procs as a harness",
+          comm(foreign.pid) == "gamescope-wl" and foreign.pid in m._scan_procs()[0])
+    check("launch_record: foreign pid is NOT owned", not m.launch_record.is_owned(foreign.pid))
+    out = m.t_stop({})[0]["text"]
+    check("er2_stop left the foreign gamescope-wl alive and said so (%s)" % out[:70],
+          alive(foreign.pid) and str(foreign.pid) in out)
+    check("guard blocks `kill -9 <foreign gamescope pid>`", guard_rc("kill -9 %d" % foreign.pid) == 2)
+    check("guard blocks `pkill -9 -x gamescope-wl` (no name-based kills)", guard_rc("pkill -9 -x gamescope-wl") == 2)
+
+    ours = lookalike()
+    time.sleep(0.3)
+    m.launch_record.record(ours.pid)
+    check("recorded pid is owned", m.launch_record.is_owned(ours.pid))
+    check("guard allows `kill -9 <recorded pid>`", guard_rc("kill -9 %d" % ours.pid) == 0)
+    # descendant: a shell we record, whose child is a lookalike
+    d = os.path.join(TMPD, "AOE3DEHarness", "gamescope-wl")
+    parent = subprocess.Popen(["bash", "-c", "%s 60 & wait" % d], start_new_session=True)
+    time.sleep(0.5)
+    kid = [int(c) for c in open("/proc/%d/task/%d/children" % (parent.pid, parent.pid)).read().split()]
+    m.launch_record.record(parent.pid)
+    check("descendant of a recorded launch is owned", kid and m.launch_record.is_owned(kid[0]))
+    out = m.t_stop({})[0]["text"]
+    ours.wait(5); time.sleep(0.2)
+    check("er2_stop killed the recorded + descendant lookalikes, spared the foreign one",
+          not alive(ours.pid) and kid and not alive(kid[0]) and alive(foreign.pid))
+    # recycled pid: a stale record whose start time no longer matches is not ownership
+    json.dump([{"pid": foreign.pid, "start": 1}], open(os.path.join(TMPD, "launches.json"), "w"))
+    check("a record with a mismatched start time (recycled pid) does not grant ownership",
+          not m.launch_record.is_owned(foreign.pid))
+finally:
+    for proc in [v for v in (foreign, locals().get("ours"), locals().get("parent")) if v]:
+        try:
+            os.killpg(proc.pid, 9)
+        except OSError:
+            pass
+        try:
+            proc.wait(5)
+        except Exception:
+            pass
+
+settings = os.path.expanduser("~/.claude/settings.json")
+if os.path.exists(settings):
+    allow = json.load(open(settings)).get("permissions", {}).get("allow", [])
+    check("settings.json no longer allow-lists any name-based gamescope kill",
+          not any("gamescope" in a for a in allow))
+
+import shutil
+shutil.rmtree(TMPD, ignore_errors=True)
 print("lifecycle: %d failure(s)" % len(fails))
 sys.exit(1 if fails else 0)

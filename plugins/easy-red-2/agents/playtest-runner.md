@@ -46,7 +46,7 @@ waiting; your job is to wait on the right signal and come back with numbers, not
   The PreToolUse guard now blocks this, but do not rely on being caught.
 - **Never force-kill Steam.** A SIGKILL destroyed the login session and blocked everything.
 - If a launch times out with no socket, clear stale keep-alive harnesses:
-  `pkill -9 -x gamescope-wl`. `pgrep -f` / `pkill -f` are unusable here — they match the calling
+  `er2_stop` (it signals only processes this plugin launched — NEVER kill gamescope by name; Bazzite Game Mode shares the name). `pgrep -f` / `pkill -f` are unusable here — they match the calling
   shell.
 - **Never leave a diagnostic build deployed.** Restore with `tools/deploy.py` and verify by grep
   on the DEPLOYED files, not the repo. The Stop guard will refuse to finish otherwise.

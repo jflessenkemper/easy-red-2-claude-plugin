@@ -100,8 +100,9 @@ fi
 if [ "$stale" -gt 0 ] && [ "${ER2_SKIP_HARNESS_CHECK:-0}" != "1" ]; then
     echo "BLOCKED: $stale harness process(es) are still running. They carry --keep-alive and \
 IGNORE SIGTERM, and Steam will refuse to start the game while they exist - the next er2_launch \
-will time out with 'harness socket not found'. Clear them with: pkill -9 -x gamescope-wl \
-(pgrep/pkill -f are blocked here; they match the calling shell)." >&2
+will time out with 'harness socket not found'. Clear them with er2_stop, which signals only \
+processes this plugin launched. NEVER kill gamescope by name - Bazzite Game Mode shares the name. If \
+er2_stop leaves one, check it with tools/er2_mcp/launch_record.py owned <pid> before kill <pid>." >&2
     exit 2
 fi
 

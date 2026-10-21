@@ -109,6 +109,36 @@ Steam closed, which ends their session. WAIT until they are finished, or ask." >
     fi
 fi
 
+# --- Rule 3: never kill a gamescope / harness BY NAME, and only kill a gamescope we launched -----
+# Bazzite Game Mode and Steam's gamescope session run processes with the same comm (gamescope-wl)
+# as our harness. `pkill -9 -x gamescope-wl` - once an allow-listed command here - would end the
+# user's whole Game Mode session. Approved by the user 2026-10-21: no name-based kills at all;
+# a gamescope may be signalled only by PID, and only if launch_record.py says this plugin launched
+# it (recorded pid with matching start time, or a descendant of one). Use er2_stop normally.
+if printf '%s' "$cmd" | grep -qiE '\b(pkill|killall)\b[^|;&]*(gamescope|AOE3DEHarness)'; then
+    echo "BLOCKED: never kill gamescope or the harness BY NAME. Bazzite Game Mode's gamescope has \
+the same process name as our harness, and killing it ends the user's session. Use er2_stop, which \
+only signals processes this plugin launched (launch_record.py). If you must kill by hand, use \
+'kill <pid>' with a pid that 'python3 tools/er2_mcp/launch_record.py owned <pid>' accepts." >&2
+    exit 2
+fi
+if printf '%s' "$cmd" | grep -qE '(^|[;&|[:space:]])kill[[:space:]]'; then
+    here=$(cd "$(dirname "$0")/.." && pwd)
+    for tok in $(printf '%s' "$cmd" | grep -oE '(^|[;&|[:space:]])kill([[:space:]]+[^;&|]*)' \
+                 | grep -oE '(^|[[:space:]])[0-9]+\b' | tr -d ' '); do
+        comm=$(cat "${ER2_PROC:-/proc}/$tok/comm" 2>/dev/null) || continue
+        case "$comm" in
+            gamescope*|AOE3DEHarness*)
+                if ! python3 "$here/tools/er2_mcp/launch_record.py" owned "$tok" >/dev/null 2>&1; then
+                    echo "BLOCKED: pid $tok is a $comm process that this plugin did NOT launch \
+(not in launch_record.py, not a descendant of a recorded launch). It may be Bazzite Game Mode or \
+Steam's gamescope session - killing it would end the user's session. Leave it alone." >&2
+                    exit 2
+                fi ;;
+        esac
+    done
+fi
+
 # --- Rule 2: never mute the default sink, and never sweep all sink-inputs ------------------------
 if printf '%s' "$cmd" | grep -qE 'pactl[^|;&]*set-sink-mute[^|;&]*@DEFAULT_SINK@'; then
     echo "BLOCKED: do not mute @DEFAULT_SINK@. Doing this once silenced the user's other game AND \

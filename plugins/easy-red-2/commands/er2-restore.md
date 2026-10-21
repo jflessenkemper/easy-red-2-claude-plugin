@@ -14,7 +14,7 @@ Restore normal state. Do these in order and VERIFY each rather than assuming.
    `/dev/input/js0` is gone. It is visible to every application and can change how the user's
    next game reads input.
 
-3. **Clear stale harnesses**: `pkill -9 -x gamescope-wl`. They carry `--keep-alive`, ignore
+3. **Clear stale harnesses**: `er2_stop` — it signals only pids in the launch record or their descendants. NEVER kill gamescope by name: Bazzite Game Mode runs a `gamescope-wl` too. They carry `--keep-alive`, ignore
    SIGTERM, and make the next launch time out with "harness socket not found".
 
 4. **Clear the Steam launch options** — but FIRST check nothing else is playing:

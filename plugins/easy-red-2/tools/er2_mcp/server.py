@@ -387,6 +387,10 @@ def running_foreign_appids():
     return sorted(found)
 
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import launch_record  # noqa: E402  - ownership record; the ONLY basis for killing a process
+
+
 def _socket_status():
     """Classify SOCK without touching any process: 'absent', 'live', or 'stale'.
 
@@ -551,6 +555,9 @@ def t_launch(args):
         while time.time() < deadline:
             st = boot.observe()
             if st and st.get("ready") == "1" and st.get("inner_alive") == "1":
+                hp = st.get("pid", "")
+                if hp.isdigit():
+                    launch_record.record(int(hp))   # Steam spawned it; the harness named itself
                 msg = ("launched via Steam (DLC entitlements available). STATE=%s"
                        % json.dumps(st)
                        + "\naudio: " + _isolate_audio() + "\n" + boot.report())
@@ -623,6 +630,7 @@ def t_launch(args):
     # (above) already allowed 180. The default was the lower of the two for the slower path, so the
     # tool reported "launch timed out ... no socket yet" for a launch that was merely still booting
     # - measured 2026-09-18, where 150s was also not enough and the socket appeared right after.
+    launch_record.record(p.pid)          # before anything else: this is what makes it OURS
     boot = _Boot(float(args.get("timeout_s", 210)))
     boot.phase("spawned harness pid %d (%s)" % (p.pid, sock_note))
     deadline = time.time() + boot.timeout
@@ -751,20 +759,31 @@ def t_stop(args):
         # "nothing to stop" here was actively misleading: on 2026-09-18 this path said exactly
         # that while game pid 69695 kept running for a day, then competed with the next launch
         # and made it time out. So fall back to a process scan and stop them for real.
-        harness, game = _scan_procs()
-        if not harness and not game:
-            return [text("nothing to stop (%s)" % e)]
-        note = "socket unreachable (%s); fell back to a process scan" % e
+        # OWNERSHIP, NOT NAME. A gamescope-wl that this plugin did not launch (Bazzite Game Mode,
+        # Steam's gamescope session) has the same comm; killing it ends the user's session. Only
+        # pids in the launch record, or their descendants, are ever signalled.
+        def owned_scan():
+            h, g = _scan_procs()
+            recs = launch_record.load()
+            mine = [x for x in g + h if launch_record.is_owned(x, recs)]
+            return mine, sorted(set(g + h) - set(mine))
+        mine, foreign = owned_scan()
+        fnote = ("; left alone %d process(es) NOT launched by this plugin: %s"
+                 % (len(foreign), ", ".join(map(str, foreign)))) if foreign else ""
+        if not mine:
+            return [text("nothing of ours to stop (%s)%s" % (e, fnote))]
+        note = "socket unreachable (%s); fell back to an ownership-checked process scan" % e
         for sig in (15, 9):
-            for pid in game + harness:          # game first, then its wrapper
+            for pid in mine:                    # recorded pids and their descendants only
                 try:
                     os.kill(pid, sig)
                 except OSError:
                     pass
             time.sleep(2.0)
-            harness, game = _scan_procs()
-            if not harness and not game:
+            mine, _ = owned_scan()
+            if not mine:
                 break
+        harness, game = mine, []
         _reap()
         try:
             os.path.exists(SOCK) and os.unlink(SOCK)
@@ -774,7 +793,8 @@ def t_stop(args):
         if left:
             return [text("%s - but pid(s) %s SURVIVED SIGKILL; check them by hand"
                          % (note, ", ".join(str(x) for x in left)))]
-        return [text("%s; all harness and game processes stopped, socket clear" % note)]
+        return [text("%s; all harness and game processes we launched are stopped, socket clear%s"
+                     % (note, fnote))]
 
     # WAIT for the harness socket to go away before returning. Returning the instant SIGTERM is
     # sent makes an immediately-following er2_launch fail with
