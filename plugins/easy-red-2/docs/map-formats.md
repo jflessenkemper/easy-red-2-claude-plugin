@@ -63,6 +63,12 @@ them (`Trench 1` returns zero hits). Enumerating them needs either a Unity bundl
 
 **Never guess an id.** An invalid prop is likely to fail silently, which is the worst outcome.
 
+**Generator:** `er2-realistic/tools/gen_prop_layout.py` builds this file from a role-based layout
+and `er2-realistic/data/props/palette.json`, where every id carries a status (`confirmed`,
+`palette-read`, `unconfirmed`). Default output is confirmed ids only (today: `Trench 1`). Add a
+harvested label to the palette as `palette-read`, and promote it to `confirmed` only after a
+generated file loads it in the editor.
+
 ## Not safely writable: the mission — `.mer2`
 
 .NET **BinaryFormatter** stream (`MissionEditorBattleData.MissionEditorBattle`). Readable with
