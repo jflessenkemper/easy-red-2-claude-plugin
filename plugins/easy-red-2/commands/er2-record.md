@@ -10,7 +10,7 @@ sheet — the sheet is what YOU read, because a model can look at one tiled imag
 a video.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/tools/record.py" clip --seconds 20 --fps 6 --name <name> \
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/record.py" clip --seconds 20 --fps 30 --name <name> \
   --region 560,300,800,450
 ```
 

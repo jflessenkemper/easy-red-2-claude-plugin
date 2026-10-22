@@ -175,7 +175,7 @@ def make_video(d, name, fps, fmt):
     out = os.path.join(OUT, "clips", "%s.mp4" % name)
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-framerate", str(fps),
            "-i", os.path.join(d, "f%%04d.%s" % fmt),
-           "-c:v", "libx264", "-pix_fmt", "yuv420p", "-vf", "scale=1280:-2", out]
+           "-c:v", "libx264", "-pix_fmt", "yuv420p", "-vf", "scale=min(960\\,iw):-2", out]
     try:
         subprocess.run(cmd, check=True)
         print("video: %s" % out)
@@ -229,7 +229,7 @@ def main():
 
     c = sub.add_parser("clip", help="record frames, then build video + sheet")
     c.add_argument("--seconds", type=float, default=20.0)
-    c.add_argument("--fps", type=float, default=4.0)
+    c.add_argument("--fps", type=float, default=30.0)  # evidence clips: 30 fps (2026-10-23)
     c.add_argument("--name", default="clip")
     c.add_argument("--cols", type=int, default=6)
     c.add_argument("--fmt", choices=["jpg", "png"], default="jpg")
