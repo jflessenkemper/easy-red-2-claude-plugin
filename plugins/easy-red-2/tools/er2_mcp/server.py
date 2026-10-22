@@ -339,7 +339,7 @@ def _preflight_steam(args):
     if not found:
         return ("no Steam LaunchOptions entry found for app %s. Steam mode cannot inject the "
                 "harness." % APPID)
-    if "%command%" not in opts or "arness" not in opts:
+    if "%command%" not in opts or ("arness" not in opts and "er2-wrap" not in opts):
         return ("Steam LaunchOptions for app %s do not wrap the harness around %%command%% "
                 "(currently: %r).\n"
                 "Steam mode CANNOT work without it - Steam would launch the game bare and no "

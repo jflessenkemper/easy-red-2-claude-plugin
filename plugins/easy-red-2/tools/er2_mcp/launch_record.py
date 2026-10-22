@@ -11,6 +11,7 @@ process with the same comm, and killing it ends the user's session. A process is
 
 Record: $ER2_TMP/launches.json (default /tmp/er2_mcp), a list of {"pid", "start"}.
 CLI (used by the guard hook):  launch_record.py owned PID   -> exit 0 owned, 1 not owned
+     (used by er2-wrap.sh):       launch_record.py record PID  -> exit 0 recorded
 """
 import json, os, sys
 
@@ -77,5 +78,7 @@ def is_owned(pid, recs=None):
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "owned":
         sys.exit(0 if is_owned(sys.argv[2]) else 1)
+    if len(sys.argv) == 3 and sys.argv[1] == "record":      # used by er2-wrap.sh before exec
+        sys.exit(0 if record(sys.argv[2]) else 1)
     print(__doc__)
     sys.exit(2)
