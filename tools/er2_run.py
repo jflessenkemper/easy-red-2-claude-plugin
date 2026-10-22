@@ -14,7 +14,7 @@ Sequence (every step after 2 is undone in `finally`, whatever happens):
   7. drive the stations; screenshots are DOWNSCALED (<= --max-width, default 960) and the
      full-res frame is deleted immediately. Full-res frames are never kept.
   8. finally: er2_stop (ownership-checked), remove flag, redeploy the SHIPPING build from the
-     main checkout, verify `deploy.py --check` and DEBUG/TELEMETRY == false in deployed files.
+     --shipping-ref (default master) via a worktree, verify `deploy.py --check` and DEBUG/TELEMETRY == false in deployed files.
 
 Stations file: JSON list of steps, each one of
   {"key": "escape"} {"click": [x, y]} {"wait": 2.5} {"shot": "name"} {"mission": {"map_row": 1}}  (mission = t_play_mission args)
@@ -168,10 +168,20 @@ class Run:
             log(text_of(server.t_stop({})))
         step("er2_stop (ownership-checked; only recorded pids)", _stop)
         step("remove flag %s" % FLAG, lambda: os.path.exists(FLAG) and os.unlink(FLAG))
-        step("redeploy SHIPPING build from %s" % MOD,
-             lambda: subprocess.run([sys.executable, os.path.join(MOD, "tools/deploy.py")], check=True))
-        step("verify deploy.py --check",
-             lambda: subprocess.run([sys.executable, os.path.join(MOD, "tools/deploy.py"), "--check"], check=True))
+        # The shipping build is a REF (default master), not whatever branch ~/er2-realistic has
+        # checked out - on 2026-10-23 it was test/visual-check, whose deploy.py would have
+        # "restored" a test build and then verified against itself.
+        ship = "/tmp/er2-ship-%d" % os.getpid()
+        def _ship_wt():
+            subprocess.run(["git", "-C", MOD, "worktree", "add", "--force", "--detach", ship,
+                            self.a.shipping_ref], check=True)
+        step("check out SHIPPING ref %s into worktree %s" % (self.a.shipping_ref, ship), _ship_wt)
+        step("redeploy SHIPPING build (%s)" % self.a.shipping_ref,
+             lambda: subprocess.run([sys.executable, os.path.join(ship, "tools/deploy.py")], check=True))
+        step("verify deploy.py --check against %s" % self.a.shipping_ref,
+             lambda: subprocess.run([sys.executable, os.path.join(ship, "tools/deploy.py"), "--check"], check=True))
+        step("remove worktree %s" % ship,
+             lambda: subprocess.run(["git", "-C", MOD, "worktree", "remove", "--force", ship], check=True))
         step("verify DEBUG/TELEMETRY false in deployed scripts", verify_flags_false)
         if self.worktree:
             step("remove worktree %s" % self.worktree,
@@ -198,6 +208,7 @@ def verify_flags_false(root=MISSION_ROOT):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--build", default="HEAD", help="git ref in ~/er2-realistic to deploy for the run")
+    ap.add_argument("--shipping-ref", default="master", help="git ref restored afterwards")
     ap.add_argument("--stations", help="JSON list of steps (see module doc)")
     ap.add_argument("--out", help="directory for downscaled screenshots")
     ap.add_argument("--max-width", type=int, default=960)
