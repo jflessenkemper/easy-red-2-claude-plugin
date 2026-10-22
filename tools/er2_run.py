@@ -18,6 +18,10 @@ Sequence (every step after 2 is undone in `finally`, whatever happens):
 
 Stations file: JSON list of steps, each one of
   {"key": "escape"} {"click": [x, y]} {"wait": 2.5} {"shot": "name"} {"mission": {"map_row": 1}}  (mission = t_play_mission args)
+Evidence gate: with --evidence-features 3,16 the run is an EVIDENCE capture, and gate() refuses
+before anything changes unless --eval (an eval_telemetry.py JSON from a REAL run) passes those
+features (~/er2-realistic/tools/clip_gate.py). Without it, shots are written with a
+manifest.json saying "exploratory: not evidence".
 --dry-run performs steps 1-2 for real (read-only) and prints every other action instead.
 """
 import argparse, glob, json, os, re, shutil, subprocess, sys, tarfile, time
@@ -67,6 +71,13 @@ class Run:
 
     # 1-2 ------------------------------------------------------------------------------------
     def gate(self):
+        if self.a.evidence_features:
+            sys.path.insert(0, os.path.join(os.path.expanduser("~/er2-realistic"), "tools"))
+            import clip_gate
+            ok, why = clip_gate.check(self.a.evidence_features.split(","), self.a.eval)
+            log("evidence gate: " + why)
+            if not ok:
+                raise Abort("evidence gate: " + why)
         import virtual_pad
         foreign = virtual_pad.foreign_steam_games()
         if foreign:
@@ -133,6 +144,10 @@ class Run:
             if os.path.exists(full):
                 os.unlink(full)               # never keep the full-res frame
         self.shots.append(small)
+        json.dump({"shots": [os.path.basename(x) for x in self.shots],
+                   "evidence_features": self.a.evidence_features, "eval": self.a.eval,
+                   "status": "evidence (eval-gated)" if self.a.evidence_features else "exploratory: not evidence"},
+                  open(os.path.join(self.out, "manifest.json"), "w"), indent=1)
         log("shot %s" % small)
 
     def stations(self):
@@ -213,6 +228,8 @@ def main(argv=None):
     ap.add_argument("--out", help="directory for downscaled screenshots")
     ap.add_argument("--max-width", type=int, default=960)
     ap.add_argument("--timeout", type=float, default=240)
+    ap.add_argument("--evidence-features", help="comma list: this run captures evidence for these features (eval gate)")
+    ap.add_argument("--eval", help="eval_telemetry.py JSON from a real run; required with --evidence-features")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
     if a.max_width > 1280:
