@@ -14,7 +14,7 @@ ok()  { printf '  \033[32mPASS\033[0m  %s\n' "$1"; PASS=$((PASS+1)); }
 bad() { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; FAIL=$((FAIL+1)); }
 
 SERVER=plugins/easy-red-2/tools/er2_mcp/server.py
-PY_FILES="$SERVER plugins/easy-red-2/tools/er2_mcp/launch_record.py plugins/easy-red-2/tools/visual_probe.py plugins/easy-red-2/tools/record.py plugins/easy-red-2/tools/virtual_pad.py tools/analyse_run.py tools/fix_steam_launch_options.py"
+PY_FILES="$SERVER plugins/easy-red-2/tools/er2_mcp/launch_record.py plugins/easy-red-2/tools/visual_probe.py plugins/easy-red-2/tools/record.py plugins/easy-red-2/tools/virtual_pad.py tools/analyse_run.py tools/fix_steam_launch_options.py tools/er2_run.py"
 
 echo "== 1. Python syntax =="
 for f in $PY_FILES; do
@@ -748,6 +748,20 @@ if python3 tests/offline_lifecycle.py >/tmp/er2_lifecycle.out 2>&1; then
   ok "lifecycle: $(grep -c '^  ok' /tmp/er2_lifecycle.out) offline assertions pass"
 else
   grep -E 'FAIL|Error' /tmp/er2_lifecycle.out | head -5; bad "harness lifecycle helpers regressed"
+fi
+
+echo "== 24. er2-wrap.sh + er2_run.py behave (offline: dry-run, no Steam, no game) =="
+if python3 tests/offline_wrap.py >/tmp/er2_wrap.out 2>&1; then
+  ok "wrapper/orchestrator: $(grep -c '^  ok' /tmp/er2_wrap.out) offline assertions pass"
+else
+  grep FAIL /tmp/er2_wrap.out | head -5; bad "er2-wrap.sh / er2_run.py regressed"
+fi
+
+echo "== 25. shellcheck the shell scripts =="
+if command -v shellcheck >/dev/null; then
+  if shellcheck -S warning er2-wrap.sh; then ok "shellcheck: er2-wrap.sh clean"; else bad "shellcheck findings in er2-wrap.sh"; fi
+else
+  echo "  note  shellcheck not installed - SKIPPED (install: ~/.local/bin/shellcheck)"
 fi
 
 echo

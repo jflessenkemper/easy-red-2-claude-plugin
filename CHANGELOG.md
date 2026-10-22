@@ -4,6 +4,25 @@ All notable changes to the **easy-red-2** Claude Code plugin.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.0]
+
+### Added
+- **`er2-wrap.sh` - flag-file Steam Launch Options wrapper.** Paste
+  `/var/home/jflessenkemper/er2-plugin/er2-wrap.sh %command%` once. With no
+  `~/.er2harness.enabled` it is a pure `exec "$@"` passthrough; with a fresh (< 30 min) flag and
+  AppId 1324780 it runs the game under the headless AOE3DEHarness gamescope on
+  `~/.er2harness.sock` and records its own pid (pre-exec) in the launch record. Removes the need
+  to edit launch options (and so shut Steam down) per run, and the need to click Steam's UI.
+- **`tools/er2_run.py` - single orchestrator** for a DLC-entitled visual run: foreign-game gate,
+  backup, deploy a chosen git ref via worktree, flag, `steam://rungameid` launch, stations,
+  downscaled-only screenshots, then a teardown that always stops (ownership-checked), removes the
+  flag, redeploys the shipping build and verifies `deploy.py --check` + DEBUG/TELEMETRY false.
+- `launch_record.py record PID` CLI; `tests/offline_wrap.py` (15 offline assertions); check.sh
+  checks 24 (wrapper/orchestrator) and 25 (shellcheck).
+
+### Changed
+- Steam preflight accepts launch options that use `er2-wrap.sh` as well as the inline harness.
+
 ## [1.13.0]
 
 ### Added
